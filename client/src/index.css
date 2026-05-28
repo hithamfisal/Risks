@@ -1,0 +1,237 @@
+/*
+ * TNOC Risk Management Dashboard
+ * Design: Modern Enterprise SaaS / Clean Authority
+ * Navy header (#1F3864) + white cards + risk zone colours as data encoding only
+ * Typography: DM Sans (headings/KPIs) + Inter (body/table)
+ */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: #F4F6F8;
+  --foreground: #1a2332;
+  --card: #ffffff;
+  --card-foreground: #1a2332;
+  --popover: #ffffff;
+  --popover-foreground: #1a2332;
+  --primary: #1F3864;
+  --primary-foreground: #ffffff;
+  --secondary: #eef1f5;
+  --secondary-foreground: #4a5568;
+  --muted: #eef1f5;
+  --muted-foreground: #718096;
+  --accent: #C9A84C;
+  --accent-foreground: #1F3864;
+  --destructive: #C0392B;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #1F3864;
+  --chart-1: #C0392B;
+  --chart-2: #E67E22;
+  --chart-3: #F1C40F;
+  --chart-4: #27AE60;
+  --chart-5: #2ECC71;
+
+  /* Risk zone colours */
+  --risk-very-high: #C0392B;
+  --risk-high: #E67E22;
+  --risk-medium: #F39C12;
+  --risk-low: #27AE60;
+  --risk-very-low: #2ECC71;
+  --risk-navy: #1F3864;
+  --risk-gold: #C9A84C;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'DM Sans', sans-serif;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  a[href] {
+    @apply cursor-pointer;
+  }
+}
+
+@layer components {
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+  .flex {
+    min-height: 0;
+    min-width: 0;
+  }
+  @media (min-width: 1280px) {
+    .container {
+      max-width: 1400px;
+      padding-left: 2rem;
+      padding-right: 2rem;
+    }
+  }
+
+  /* Dashboard card */
+  .dash-card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    overflow: hidden;
+  }
+
+  /* KPI number font */
+  .kpi-number {
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 800;
+  }
+
+  /* Monospace for risk IDs */
+  .risk-id {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+  }
+
+  /* Score badge */
+  .score-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 1.5rem;
+    border-radius: 0.25rem;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 700;
+    font-size: 0.75rem;
+    color: white;
+  }
+
+  /* Stagger animation */
+  .animate-fade-up {
+    animation: fadeUp 0.5s ease forwards;
+    opacity: 0;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Upload drop zone */
+  .drop-zone {
+    border: 2px dashed #cbd5e0;
+    border-radius: 0.75rem;
+    transition: all 0.2s ease;
+  }
+  .drop-zone.drag-over {
+    border-color: #1F3864;
+    background: #EBF4FF;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Professional TNOC dashboard refinements
+   Keeps the UI compact at 100% browser zoom and makes dark/light surfaces
+   more consistent for native controls, sticky tables and export captures.
+   ────────────────────────────────────────────────────────────────────────── */
+.dashboard-shell {
+  color-scheme: light;
+}
+.dark .dashboard-shell {
+  color-scheme: dark;
+}
+.dashboard-section {
+  scroll-margin-top: 78px;
+}
+.section-export-body {
+  background: transparent;
+}
+.risk-table th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+.risk-table tbody tr {
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+.risk-table tbody tr:hover {
+  transform: translateY(-1px);
+}
+.dashboard-shell select,
+.dashboard-shell input,
+.dashboard-shell button {
+  font-family: 'Inter', sans-serif;
+}
+.dashboard-shell ::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.dashboard-shell ::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+}
+.dashboard-shell ::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #0078ff, #12d6b1);
+  border-radius: 999px;
+}
+
+@media (max-width: 1180px) {
+  .kpi-row,
+  .chart-row,
+  .summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .kpi-row,
+  .chart-row,
+  .summary-row {
+    grid-template-columns: 1fr !important;
+  }
+}
