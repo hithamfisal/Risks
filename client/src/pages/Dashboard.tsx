@@ -232,18 +232,29 @@ interface SectionCardProps {
   title: string;
   palette: ThemePalette;
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: ReactNode;
   actions?: ReactNode;
   bodyRef?: RefObject<HTMLDivElement | null>;
   compact?: boolean;
 }
 
-function SectionCard({ id, title, palette, defaultOpen = true, children, actions, bodyRef, compact = false }: SectionCardProps) {
-  const [open, setOpen] = useState(defaultOpen);
+function SectionCard({ id, title, palette, defaultOpen = false, open: controlledOpen, onOpenChange, children, actions, bodyRef, compact = false }: SectionCardProps) {
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? internalOpen;
+  const toggleOpen = () => {
+    const nextOpen = !open;
+    if (controlledOpen === undefined) {
+      setInternalOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  };
+
   return (
     <section id={id} className="dashboard-section" style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 18, overflow: 'hidden', boxShadow: palette.shadow, backdropFilter: 'blur(18px)' }}>
       <div style={{ background: palette.sectionHeader, padding: compact ? '7px 12px' : '9px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <button type="button" className="no-print" onClick={() => setOpen(v => !v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: 'white', fontFamily: 'DM Sans, sans-serif', fontWeight: 900, fontSize: compact ? 12 : 13, cursor: 'pointer', padding: 0 }}>
+        <button type="button" className="no-print" onClick={toggleOpen} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: 'white', fontFamily: 'DM Sans, sans-serif', fontWeight: 900, fontSize: compact ? 12 : 13, cursor: 'pointer', padding: 0 }}>
           {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           {title}
         </button>
@@ -411,12 +422,31 @@ interface Props {
 
 export default function DashboardPage({ data, fileName, onReset, onWeekChange }: Props) {
   const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek } = data;
+
+  // Normalize target KPI math at the display layer as a safety guard.
+  // Total Risks is the risk-category total from Excel Output, not Total Mitigation.
+  // Above Target + Below Target must equal Total Risks, including saved previous uploads.
+  const normalizedKpis = useMemo(() => {
+    const categoryTotal = Object.values(zoneCounts || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    const totalRisks = Number(kpis.totalRisks) || categoryTotal || 0;
+    const aboveTarget = Math.min(Math.max(Number(kpis.aboveTarget) || 0, 0), totalRisks);
+    const belowTarget = Math.max(totalRisks - aboveTarget, 0);
+    return { ...kpis, totalRisks, aboveTarget, belowTarget };
+  }, [kpis, zoneCounts]);
+
   const [activeRisk, setActiveRisk] = useState(selectedRisk);
   const [showTrend, setShowTrend] = useState(false);
   const [filterRating, setFilterRating] = useState('All');
   const [filterOwner, setFilterOwner] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({
+    'kpi-section': false,
+    'summary-section': false,
+    'charts-section': false,
+    'risk-register-section': false,
+    'selected-risk-section': false,
+  });
 
   const dashboardRef = useRef<HTMLDivElement>(null);
   const kpiRef = useRef<HTMLDivElement>(null);
@@ -605,7 +635,29 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     XLSX.writeFile(wb, `TNOC_Risk_Register_${selectedWeek || period}.xlsx`);
   }, [filteredRisks, selectedWeek, period]);
 
-  const scrollToSection = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const visibleSectionIds = useMemo(() => {
+    const ids = ['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'];
+    if (activeRisk) ids.push('selected-risk-section');
+    return ids;
+  }, [activeRisk]);
+
+  const allSectionsExpanded = visibleSectionIds.every(id => sectionOpen[id]);
+
+  const setSingleSectionOpen = useCallback((id: string, open: boolean) => {
+    setSectionOpen(prev => ({ ...prev, [id]: open }));
+  }, []);
+
+  const toggleAllSections = useCallback(() => {
+    setSectionOpen(prev => {
+      const visibleIds = ['kpi-section', 'summary-section', 'charts-section', 'risk-register-section', ...(activeRisk ? ['selected-risk-section'] : [])];
+      const shouldExpand = !visibleIds.every(id => prev[id]);
+      return visibleIds.reduce((acc, id) => ({ ...acc, [id]: shouldExpand }), prev);
+    });
+  }, [activeRisk]);
+
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const inputStyle: CSSProperties = {
     height: 33,
@@ -651,7 +703,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
 
       <div ref={dashboardRef} className="dashboard-shell" style={{ minHeight: '100vh', backgroundColor: palette.page, fontFamily: 'Inter, sans-serif', color: palette.text }}>
-        <header style={{ background: palette.header, borderBottom: `1px solid ${palette.border}`, position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(16px)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.28)' : '0 12px 34px rgba(31,56,100,.10)' }}>
+        <header style={{ background: isDark ? '#041127' : '#ffffff', borderBottom: `1px solid ${palette.border}`, position: 'sticky', top: 0, zIndex: 80, backdropFilter: 'none', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.36)' : '0 12px 34px rgba(31,56,100,.12)' }}>
           <div style={{ maxWidth: 1460, margin: '0 auto', padding: '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
               <div className="hidden sm:flex" style={{ alignItems: 'center', gap: 7, flex: '0 0 auto' }}>
@@ -671,6 +723,10 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               </div>
               {weeks?.length > 0 && <select value={selectedWeek || ''} onChange={e => onWeekChange(e.target.value)} style={selectStyle}>{weeks.map(w => <option key={w.label} value={w.label}>{w.label}</option>)}</select>}
               {['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'].map(id => <button key={id} type="button" onClick={() => scrollToSection(id)} style={{ border: `1px solid ${palette.border}`, background: palette.cardSoft, color: palette.text, borderRadius: 999, padding: '7px 10px', fontSize: 10, fontWeight: 850, cursor: 'pointer' }}>{id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : 'Register'}</button>)}
+              <button onClick={toggleAllSections} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 999, padding: '8px 12px', color: palette.text, fontWeight: 850, fontSize: 11, cursor: 'pointer' }}>
+                {allSectionsExpanded ? <EyeOff size={13} /> : <Eye size={13} />}
+                {allSectionsExpanded ? 'Collapse All' : 'Expand All'}
+              </button>
               <button onClick={handlePrint} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: SE.navy, border: 'none', borderRadius: 999, padding: '8px 12px', color: 'white', fontWeight: 850, fontSize: 11, cursor: 'pointer' }}><Printer size={13} />PDF</button>
               <button onClick={() => exportElementAsPNG(dashboardRef, 'TNOC_Full_Dashboard.png', bgForExport)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `linear-gradient(135deg, ${SE.blue}, ${SE.teal})`, border: 'none', borderRadius: 999, padding: '8px 12px', color: 'white', fontWeight: 850, fontSize: 11, cursor: 'pointer' }}><ImageDown size={13} />PNG</button>
               <ThemeToggle />
@@ -680,20 +736,20 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           </div>
         </header>
 
-        <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundAttachment: 'fixed' }}>
+        <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundRepeat: 'no-repeat', backgroundAttachment: 'scroll' }}>
         <main style={{ maxWidth: 1460, margin: '0 auto', padding: '12px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'TNOC_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
+          <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'TNOC_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
             <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 9 }}>
-              <KpiTile label="Total Risks" value={kpis.totalRisks} color={SE.navy} selectedWeek={selectedWeek} index={0} palette={palette} />
-              <KpiTile label="Total Mitigation" value={kpis.totalMitigation} color={SE.blue} selectedWeek={selectedWeek} index={1} palette={palette} />
-              <KpiTile label="Above Target" value={kpis.aboveTarget} color={SE.green} selectedWeek={selectedWeek} index={2} palette={palette} />
-              <KpiTile label="Below Target" value={kpis.belowTarget} color={SE.red} selectedWeek={selectedWeek} index={3} palette={palette} />
-              <KpiTile label="Avg. Risk Score" value={kpis.avgRiskScore} color={SE.orange} selectedWeek={selectedWeek} index={4} palette={palette} />
-              <KpiTile label="Avg. Risk Rating" value={kpis.avgRiskRating} isText color={SE.navy2} selectedWeek={selectedWeek} index={5} palette={palette} />
+              <KpiTile label="Total Risks" value={normalizedKpis.totalRisks} color={SE.navy} selectedWeek={selectedWeek} index={0} palette={palette} />
+              <KpiTile label="Total Mitigation" value={normalizedKpis.totalMitigation} color={SE.blue} selectedWeek={selectedWeek} index={1} palette={palette} />
+              <KpiTile label="Above Target" value={normalizedKpis.aboveTarget} color={SE.green} selectedWeek={selectedWeek} index={2} palette={palette} />
+              <KpiTile label="Below Target" value={normalizedKpis.belowTarget} color={SE.red} selectedWeek={selectedWeek} index={3} palette={palette} />
+              <KpiTile label="Avg. Risk Score" value={normalizedKpis.avgRiskScore} color={SE.orange} selectedWeek={selectedWeek} index={4} palette={palette} />
+              <KpiTile label="Avg. Risk Rating" value={normalizedKpis.avgRiskRating} isText color={SE.navy2} selectedWeek={selectedWeek} index={5} palette={palette} />
             </div>
           </SectionCard>
 
-          <SectionCard id="summary-section" title="Professional Risk Movement Summary" palette={palette} bodyRef={summaryRef} compact actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(summaryRef, 'TNOC_Risk_Movement_Summary.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          <SectionCard id="summary-section" title="Professional Risk Movement Summary" palette={palette} bodyRef={summaryRef} compact open={sectionOpen['summary-section']} onOpenChange={open => setSingleSectionOpen('summary-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(summaryRef, 'TNOC_Risk_Movement_Summary.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 9 }}>
               {[
                 { label: 'Improved vs Previous Week', value: changesSummary.improved, sub: `${changesSummary.total} filtered risks`, color: SE.green, icon: <TrendingUp size={16} /> },
@@ -714,7 +770,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          <SectionCard id="charts-section" title="Professional Risk Analytics Charts" palette={palette} bodyRef={chartsRef} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'TNOC_Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          <SectionCard id="charts-section" title="Professional Risk Analytics Charts" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'TNOC_Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div className="professional-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>1. Risk Category Donut</h3>
@@ -815,7 +871,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          <SectionCard id="risk-register-section" title={`Risk Register — ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} actions={<><SmallActionButton palette={palette} onClick={exportRisksToExcel}><FileSpreadsheet size={12} />Excel</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'TNOC_Risk_Register.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
+          <SectionCard id="risk-register-section" title={`Risk Register — ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} open={sectionOpen['risk-register-section']} onOpenChange={open => setSingleSectionOpen('risk-register-section', open)} actions={<><SmallActionButton palette={palette} onClick={exportRisksToExcel}><FileSpreadsheet size={12} />Excel</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'TNOC_Risk_Register.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
             <div className="no-print" style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 900 }}><Filter size={13} />Filters</span>
               <div style={{ position: 'relative' }}><Search size={13} style={{ position: 'absolute', left: 12, top: 10, color: palette.muted }} /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search title, mitigation, owner…" style={inputStyle} /></div>
@@ -866,7 +922,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          {activeRisk && <SectionCard id="selected-risk-section" title={`Selected Risk Detail — ${activeRisk.title}`} palette={palette} bodyRef={selectedRef} defaultOpen={false} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'TNOC_Selected_Risk_Detail.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          {activeRisk && <SectionCard id="selected-risk-section" title={`Selected Risk Detail — ${activeRisk.title}`} palette={palette} bodyRef={selectedRef} open={sectionOpen['selected-risk-section']} onOpenChange={open => setSingleSectionOpen('selected-risk-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'TNOC_Selected_Risk_Detail.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 14, alignItems: 'start' }}>
               <div style={chartBox(palette)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><ScoreBadge score={activeRisk.score} /><span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 950, fontSize: 12 }}>{activeRisk.rating}</span><span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span></div>
