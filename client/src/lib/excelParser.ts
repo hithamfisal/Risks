@@ -86,6 +86,7 @@ export interface DashboardData {
   riskSummary: { name: string; value: number; color: string }[];
   riskRegister: RiskRow[];
   selectedRisk: RiskRow | null;
+  mitigationTargetsByWeek?: Record<string, { aboveTarget: number; belowTarget: number }>;
 }
 
 export function getScoreColor(score: number): string {
@@ -165,6 +166,11 @@ function buildRiskSummary(aboveTarget: number, belowTarget: number): DashboardDa
     { name: 'Below Target', value: belowTarget, color: '#C0392B' },
   ].filter(d => d.value > 0);
 }
+
+function isNumericCell(v: unknown): boolean {
+  return v !== null && v !== undefined && v !== '' && !String(v).startsWith('#') && !isNaN(Number(v));
+}
+
 
 /**
  * Build per-risk per-week weighted progress map from "Approved TNOC Risk" sheet.
@@ -289,15 +295,9 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   if (!approvedSheet) throw new Error('Sheet "Approved TNOC Risk" not found in workbook.');
   const approved = XLSX.utils.sheet_to_json<unknown[]>(approvedSheet, { header: 1, defval: null }) as unknown[][];
   // Total Risks = COUNT('Approved TNOC Risk'!A:A) — count numeric values in col A (idx 0)
-  const totalRisks = approved.filter(row => {
-    const v = (row as unknown[])[0];
-    return v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
-  }).length;
+  const totalRisks = approved.filter(row => isNumericCell((row as unknown[])[0])).length;
   // Total Mitigation = COUNT('Approved TNOC Risk'!Q:Q) — count numeric values in col Q (idx 16)
-  const totalMitigation = approved.filter(row => {
-    const v = (row as unknown[])[16];
-    return v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
-  }).length;
+  const totalMitigation = approved.filter(row => isNumericCell((row as unknown[])[16])).length;
 
   // Detect week columns from row 2 (idx 1) — cols X(23) onwards
   const headerRow2 = approved[1] || [];
@@ -381,11 +381,11 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const finalZoneCounts = computedZoneTotal > 0 ? computedZoneCounts : outputZoneCounts;
   const finalTotalRisks = computedZoneTotal > 0 ? computedZoneTotal : (outputZoneTotal || registerTotalRisks);
 
-  // Recompute KPI above/below and Risk Summary from actual data.
-  const aboveCount = riskRegister.filter(r => r.aboveTarget).length;
-  const belowCount = riskRegister.filter(r => r.belowTarget).length;
-  const finalAboveTarget = aboveCount || aboveTarget;
-  const finalBelowTarget = belowCount || belowTarget;
+  // Above/Below Target are risk KPIs, so their denominator must be Total Risks.
+  // This keeps: Above Target + Below Target = Total Risks.
+  // Above Target comes from the Excel Output sheet col H flags; Below Target is the remaining risks.
+  const finalAboveTarget = Math.min(finalTotalRisks, Math.max(aboveTarget, 0));
+  const finalBelowTarget = Math.max(finalTotalRisks - finalAboveTarget, 0);
   const riskSummary = buildRiskSummary(finalAboveTarget, finalBelowTarget);
 
   const selectedRisk = riskRegister.find(r => r.rating === 'Very High') || riskRegister[0] || null;
@@ -445,8 +445,12 @@ export function switchWeek(data: DashboardData, newWeek: string): DashboardData 
   const completed   = riskRegister.filter(r => r.currentPct >= 100).length;
   const inProgress  = riskRegister.filter(r => r.currentPct > 0 && r.currentPct < 100).length;
   const notStarted  = riskRegister.filter(r => r.currentPct === 0).length;
-  const aboveCount  = riskRegister.filter(r => r.aboveTarget).length;
-  const belowCount  = riskRegister.filter(r => r.belowTarget).length;
+
+  // Above/Below Target are risk-level KPIs, not mitigation-level KPIs.
+  // Their denominator must stay equal to Total Risks from the KPI/risk category total.
+  const totalRisks = Number(data.kpis.totalRisks) || 0;
+  const aboveCount = Math.min(totalRisks, riskRegister.filter(r => r.aboveTarget).length);
+  const belowCount = Math.max(totalRisks - aboveCount, 0);
   const riskSummary = buildRiskSummary(aboveCount, belowCount);
 
   // Recompute avg risk score (score doesn't change by week, but keep consistent)
@@ -463,6 +467,7 @@ export function switchWeek(data: DashboardData, newWeek: string): DashboardData 
     selectedWeek: newWeek,
     kpis: {
       ...data.kpis,
+      totalRisks,
       aboveTarget: aboveCount,
       belowTarget: belowCount,
       avgRiskScore: avgScore,
@@ -569,8 +574,8 @@ export function getSampleData(): DashboardData {
     zoneCounts: { veryHigh: 2, high: 14, moderate: 12, low: 0, veryLow: 0 },
     progressCounts: { completed: 8, inProgress: 20, notStarted: 0 },
     riskSummary: [
-      { name: 'Open',   value: 21, color: '#1A6B8A' },
-      { name: 'Closed', value: 7,  color: '#E67E22' },
+      { name: 'Above Target', value: 16, color: '#27AE60' },
+      { name: 'Below Target', value: 12, color: '#C0392B' },
     ],
     riskRegister: sampleRisks,
     selectedRisk: sampleRisks[1],

@@ -595,6 +595,28 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     backgroundPosition: 'right 10px center',
   };
 
+  const monthSelectStyle: CSSProperties = {
+    backgroundColor: SE.navy,
+    border: `2px solid ${SE.teal}`,
+    borderRadius: 999,
+    padding: '10px 44px 10px 18px',
+    minWidth: 178,
+    height: 44,
+    color: '#ffffff',
+    fontSize: 14,
+    fontFamily: 'DM Sans, Inter, sans-serif',
+    fontWeight: 950,
+    letterSpacing: '.01em',
+    cursor: 'pointer',
+    outline: 'none',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    boxShadow: isDark ? '0 14px 34px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.18)' : '0 14px 30px rgba(0,83,143,.22), inset 0 1px rgba(255,255,255,.22)',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 16px center',
+  };
+
   const resetFilters = useCallback(() => {
     setFilterRating('All');
     setFilterOwner('All');
@@ -721,7 +743,14 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               <div style={{ height: 42, width: 72, padding: 5, borderRadius: 12, background: 'rgba(255,255,255,.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(0,0,0,.08)', marginRight: 4 }}>
                 <img src={NASCO_LOGO.src} alt={NASCO_LOGO.alt} style={{ maxHeight: NASCO_LOGO.height, maxWidth: '100%', objectFit: 'contain' }} />
               </div>
-              {weeks?.length > 0 && <select value={selectedWeek || ''} onChange={e => onWeekChange(e.target.value)} style={selectStyle}>{weeks.map(w => <option key={w.label} value={w.label}>{w.label}</option>)}</select>}
+              {weeks?.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 4px 10px', borderRadius: 999, background: isDark ? 'rgba(15, 36, 66, .92)' : 'rgba(239, 248, 255, .96)', border: `1px solid ${isDark ? 'rgba(91, 203, 255, .24)' : 'rgba(0, 83, 143, .18)'}`, boxShadow: isDark ? '0 10px 28px rgba(0,0,0,.25)' : '0 10px 24px rgba(31,56,100,.10)' }}>
+                  <span style={{ color: isDark ? '#BFEFFF' : SE.navy, fontSize: 11, fontWeight: 950, textTransform: 'uppercase', letterSpacing: '.08em', whiteSpace: 'nowrap' }}>Month</span>
+                  <select aria-label="Select dashboard month" value={selectedWeek || ''} onChange={e => onWeekChange(e.target.value)} style={monthSelectStyle}>
+                    {weeks.map(w => <option key={w.label} value={w.label} style={{ color: '#0f172a', background: '#ffffff', fontWeight: 800 }}>{w.label}</option>)}
+                  </select>
+                </div>
+              )}
               {['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'].map(id => <button key={id} type="button" onClick={() => scrollToSection(id)} style={{ border: `1px solid ${palette.border}`, background: palette.cardSoft, color: palette.text, borderRadius: 999, padding: '7px 10px', fontSize: 10, fontWeight: 850, cursor: 'pointer' }}>{id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : 'Register'}</button>)}
               <button onClick={toggleAllSections} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 999, padding: '8px 12px', color: palette.text, fontWeight: 850, fontSize: 11, cursor: 'pointer' }}>
                 {allSectionsExpanded ? <EyeOff size={13} /> : <Eye size={13} />}
