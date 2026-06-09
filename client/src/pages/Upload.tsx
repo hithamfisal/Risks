@@ -89,7 +89,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
       style={{ backgroundColor: isDark ? '#061630' : '#F8FBFF' }}
     >
       {/* Header */}
-      <header style={{ background: isDark ? '#06162F' : '#FFFFFF', borderBottom: isDark ? '1px solid rgba(125, 211, 252, 0.22)' : '1px solid rgba(31,56,100,0.12)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.22)' : '0 12px 34px rgba(31,56,100,.10)', position: 'relative', zIndex: 10 }}>
+      <header style={{ background: isDark ? 'rgba(5, 18, 43, 0.92)' : 'rgba(255, 255, 255, 0.94)', backdropFilter: 'blur(16px)', borderBottom: isDark ? '1px solid rgba(125, 211, 252, 0.22)' : '1px solid rgba(31,56,100,0.12)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.22)' : '0 12px 34px rgba(31,56,100,.10)' }}>
         <div className="container py-3 flex items-center justify-between gap-4">
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
             <div className="hidden sm:flex" style={{ alignItems: 'center', gap: 10 }}>
@@ -123,7 +123,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
           backgroundImage: `${isDark ? 'linear-gradient(90deg, rgba(2,6,23,.42), rgba(2,6,23,.12))' : 'linear-gradient(90deg, rgba(255,255,255,.55), rgba(255,255,255,.28))'}, url(${pageBg})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center top',
-          backgroundAttachment: 'scroll',
+          backgroundAttachment: 'fixed',
         }}
       >
         <div className="w-full max-w-2xl">

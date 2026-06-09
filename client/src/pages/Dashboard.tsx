@@ -421,7 +421,7 @@ interface Props {
 }
 
 export default function DashboardPage({ data, fileName, onReset, onWeekChange }: Props) {
-  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek } = data;
+  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel } = data;
 
   // Normalize target KPI math at the display layer as a safety guard.
   // Total Risks is the risk-category total from Excel Output, not Total Mitigation.
@@ -530,17 +530,23 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   }), [riskRegister, weeks]);
 
   const ownerHighRiskData = useMemo(() => {
-    const counts = riskRegister
-      .filter(r => r.score >= 15 || /high/i.test(r.rating))
-      .reduce<Record<string, number>>((acc, r) => {
-        const owner = r.owner || 'Unassigned';
-        acc[owner] = (acc[owner] || 0) + 1;
-        return acc;
-      }, {});
-    return Object.entries(counts)
-      .map(([owner, count]) => ({ owner: owner.length > 22 ? `${owner.slice(0, 22)}…` : owner, fullOwner: owner, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+    const map: Record<string, { count: number; totalPct: number; highCount: number }> = {};
+    riskRegister.forEach(r => {
+      const owner = r.owner || 'Unassigned';
+      if (!map[owner]) map[owner] = { count: 0, totalPct: 0, highCount: 0 };
+      map[owner].count += 1;
+      map[owner].totalPct += r.currentPct;
+      if (r.score >= 15 || /high/i.test(r.rating)) map[owner].highCount += 1;
+    });
+    return Object.entries(map)
+      .map(([owner, d]) => ({
+        owner: owner.length > 22 ? `${owner.slice(0, 22)}…` : owner,
+        fullOwner: owner,
+        count: d.count,
+        avgPct: Math.round(d.totalPct / d.count),
+        highCount: d.highCount,
+      }))
+      .sort((a, b) => b.count - a.count);
   }, [riskRegister]);
 
   const overdueByOwnerData = useMemo(() => {
@@ -558,11 +564,16 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       .slice(0, 10);
   }, [riskRegister]);
 
-  const progressData = useMemo(() => [
-    { name: 'Not Started', fullName: 'Not Started (0%)', value: progressCounts.notStarted, color: SE.red },
-    { name: 'In Progress', fullName: 'In Progress (1-99%)', value: progressCounts.inProgress, color: SE.gold },
-    { name: 'Completed', fullName: 'Completed (100%)', value: progressCounts.completed, color: SE.green },
-  ], [progressCounts]);
+  const progressData = useMemo(() => {
+    const completed  = riskRegister.filter(r => r.currentPct >= 100).length || progressCounts.completed;
+    const inProgress = riskRegister.filter(r => r.currentPct > 0 && r.currentPct < 100).length || progressCounts.inProgress;
+    const notStarted = riskRegister.filter(r => r.currentPct === 0).length || progressCounts.notStarted;
+    return [
+      { name: 'Not Started', fullName: 'Not Started (0%)', value: notStarted, color: SE.red },
+      { name: 'In Progress', fullName: 'In Progress (1-99%)', value: inProgress, color: SE.gold },
+      { name: 'Completed',   fullName: 'Completed (100%)',   value: completed,  color: SE.green },
+    ];
+  }, [riskRegister, progressCounts]);
 
   const detailData = useMemo(() => riskRegister.map(r => ({
     name: r.title.length > 34 ? `${r.title.slice(0, 34)}…` : r.title,
@@ -593,28 +604,6 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(isDark ? '#A8C3DD' : '#64748B')}' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
     backgroundRepeat: 'no-repeat',
     backgroundPosition: 'right 10px center',
-  };
-
-  const monthSelectStyle: CSSProperties = {
-    backgroundColor: SE.navy,
-    border: `2px solid ${SE.teal}`,
-    borderRadius: 999,
-    padding: '10px 44px 10px 18px',
-    minWidth: 178,
-    height: 44,
-    color: '#ffffff',
-    fontSize: 14,
-    fontFamily: 'DM Sans, Inter, sans-serif',
-    fontWeight: 950,
-    letterSpacing: '.01em',
-    cursor: 'pointer',
-    outline: 'none',
-    appearance: 'none',
-    WebkitAppearance: 'none',
-    boxShadow: isDark ? '0 14px 34px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.18)' : '0 14px 30px rgba(0,83,143,.22), inset 0 1px rgba(255,255,255,.22)',
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
-    backgroundRepeat: 'no-repeat',
-    backgroundPosition: 'right 16px center',
   };
 
   const resetFilters = useCallback(() => {
@@ -725,7 +714,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
 
       <div ref={dashboardRef} className="dashboard-shell" style={{ minHeight: '100vh', backgroundColor: palette.page, fontFamily: 'Inter, sans-serif', color: palette.text }}>
-        <header style={{ background: isDark ? '#041127' : '#ffffff', borderBottom: `1px solid ${palette.border}`, position: 'sticky', top: 0, zIndex: 80, backdropFilter: 'none', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.36)' : '0 12px 34px rgba(31,56,100,.12)' }}>
+        <header style={{ background: palette.header, borderBottom: `1px solid ${palette.border}`, position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(16px)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.28)' : '0 12px 34px rgba(31,56,100,.10)' }}>
           <div style={{ maxWidth: 1460, margin: '0 auto', padding: '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
               <div className="hidden sm:flex" style={{ alignItems: 'center', gap: 7, flex: '0 0 auto' }}>
@@ -743,14 +732,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               <div style={{ height: 42, width: 72, padding: 5, borderRadius: 12, background: 'rgba(255,255,255,.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(0,0,0,.08)', marginRight: 4 }}>
                 <img src={NASCO_LOGO.src} alt={NASCO_LOGO.alt} style={{ maxHeight: NASCO_LOGO.height, maxWidth: '100%', objectFit: 'contain' }} />
               </div>
-              {weeks?.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 4px 10px', borderRadius: 999, background: isDark ? 'rgba(15, 36, 66, .92)' : 'rgba(239, 248, 255, .96)', border: `1px solid ${isDark ? 'rgba(91, 203, 255, .24)' : 'rgba(0, 83, 143, .18)'}`, boxShadow: isDark ? '0 10px 28px rgba(0,0,0,.25)' : '0 10px 24px rgba(31,56,100,.10)' }}>
-                  <span style={{ color: isDark ? '#BFEFFF' : SE.navy, fontSize: 11, fontWeight: 950, textTransform: 'uppercase', letterSpacing: '.08em', whiteSpace: 'nowrap' }}>Month</span>
-                  <select aria-label="Select dashboard month" value={selectedWeek || ''} onChange={e => onWeekChange(e.target.value)} style={monthSelectStyle}>
-                    {weeks.map(w => <option key={w.label} value={w.label} style={{ color: '#0f172a', background: '#ffffff', fontWeight: 800 }}>{w.label}</option>)}
-                  </select>
-                </div>
-              )}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 10, padding: '6px 12px', fontSize: 11, fontWeight: 800, color: palette.text }}>
+                <span style={{ color: palette.muted, fontWeight: 700 }}>Current:</span>
+                <span style={{ color: SE.blue }}>{selectedWeek}</span>
+                {prevWeekLabel && prevWeekLabel !== selectedWeek && <><span style={{ color: palette.muted }}>vs</span><span style={{ color: SE.gold }}>{prevWeekLabel}</span></>}
+              </div>
+              <select value={selectedWeek || ''} onChange={e => onWeekChange(e.target.value)} style={selectStyle}>{(weeks?.length > 0 ? weeks : [{ label: selectedWeek || 'Current', colIndex: 0 }]).map(w => <option key={w.label} value={w.label}>{w.label}</option>)}</select>
               {['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'].map(id => <button key={id} type="button" onClick={() => scrollToSection(id)} style={{ border: `1px solid ${palette.border}`, background: palette.cardSoft, color: palette.text, borderRadius: 999, padding: '7px 10px', fontSize: 10, fontWeight: 850, cursor: 'pointer' }}>{id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : 'Register'}</button>)}
               <button onClick={toggleAllSections} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 999, padding: '8px 12px', color: palette.text, fontWeight: 850, fontSize: 11, cursor: 'pointer' }}>
                 {allSectionsExpanded ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -765,7 +752,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           </div>
         </header>
 
-        <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundRepeat: 'no-repeat', backgroundAttachment: 'scroll' }}>
+        <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundAttachment: 'fixed' }}>
         <main style={{ maxWidth: 1460, margin: '0 auto', padding: '12px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'TNOC_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
             <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 9 }}>
@@ -853,22 +840,74 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               </div>
 
               <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>5. Owner High-Risk Ranking</h3>
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={ownerHighRiskData} layout="vertical" margin={{ top: 8, right: 38, left: 4, bottom: 6 }}>
+                <h3 style={chartTitle(palette)}>5. Risks by Owner</h3>
+                <ResponsiveContainer width="100%" height={Math.max(260, ownerHighRiskData.length * 38)}>
+                  <BarChart
+                    data={ownerHighRiskData}
+                    layout="vertical"
+                    margin={{ top: 8, right: 60, left: 4, bottom: 6 }}
+                    barCategoryGap="20%"
+                    barGap={3}
+                  >
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-                    <XAxis type="number" tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} domain={[0, Math.max(2, ...ownerHighRiskData.map(d => d.count)) + 1]} />
+                    <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} domain={[0, 100]} axisLine={{ stroke: palette.border }} tickLine={false} />
                     <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={130} axisLine={false} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="count" name="High Risks" fill={SE.red} radius={[0, 8, 8, 0]} animationDuration={650} label={{ position: 'right', fontSize: 11, fontWeight: 900, fill: palette.text }} />
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = ownerHighRiskData.find(o => o.owner === label);
+                        return (
+                          <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 11, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                            <div style={{ fontWeight: 700, color: palette.text, marginBottom: 4 }}>{d?.fullOwner || label}</div>
+                            {payload.map((p: any) => (
+                              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: 2, background: p.fill, display: 'inline-block' }} />
+                                <span style={{ color: palette.muted }}>{p.name}:</span>
+                                <span style={{ fontWeight: 700, color: palette.text }}>{p.value}{p.name === 'Avg Progress %' ? '%' : ''}</span>
+                              </div>
+                            ))}
+                            {d && d.highCount > 0 && (
+                              <div style={{ marginTop: 4, fontSize: 10, color: SE.orange, fontWeight: 600 }}>⚠ {d.highCount} high-risk (score ≥15)</div>
+                            )}
+                          </div>
+                        );
+                      }}
+                    />
+                    <Bar dataKey="count" name="Risk Count" fill={SE.blue} radius={[0, 4, 4, 0]} barSize={10} animationDuration={650}
+                      label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: SE.blue, formatter: (v: number) => v }}
+                    />
+                    <Bar dataKey="avgPct" name="Avg Progress %" radius={[0, 4, 4, 0]} barSize={10} animationDuration={650}
+                      label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: palette.muted, formatter: (v: number) => `${v}%` }}
+                    >
+                      {ownerHighRiskData.map((entry, index) => (
+                        <Cell key={index} fill={entry.avgPct >= 80 ? SE.green : entry.avgPct >= 50 ? SE.gold : SE.red} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+                <div style={legendStyle}>{[[SE.blue, 'Risk Count'], [SE.green, 'Avg Progress ≥80%'], [SE.gold, '50–79%'], [SE.red, '<50%']].map(([c, l]) => <span key={l} style={legendItem(palette)}><span style={{ width: 12, height: 7, background: c, borderRadius: 2 }} />{l}</span>)}</div>
               </div>
             </div>
 
-            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '.9fr 1.1fr', gap: 10, marginTop: 10 }}>
+            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
               <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>6. Overdue Mitigation Bar Chart</h3>
+                <h3 style={chartTitle(palette)}>6. Risk Progress Status</h3>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={progressData} margin={{ top: 14, right: 16, left: 0, bottom: 4 }} barCategoryGap="35%">
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="value" name="Risks" radius={[6, 6, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 13, fontWeight: 900, fill: palette.text }}>
+                      {progressData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div style={legendStyle}>{progressData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.fullName}</span>)}</div>
+              </div>
+
+              <div style={{ ...chartBox(palette), gridColumn: 'span 2' }}>
+                <h3 style={chartTitle(palette)}>7. Overdue Mitigation Bar Chart</h3>
                 {overdueByOwnerData.length > 0 ? <ResponsiveContainer width="100%" height={250}>
                   <BarChart data={overdueByOwnerData} layout="vertical" margin={{ top: 8, right: 38, left: 4, bottom: 6 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
@@ -982,7 +1021,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     const prev = i > 0 ? Math.round((activeRisk.weekProgress[weeks[i - 1].label] ?? 0) * 100) : val;
                     const color = val > prev ? SE.green : val < prev ? SE.red : palette.muted;
                     const isSelected = w.label === selectedWeek;
-                    return <div key={w.label} style={{ minWidth: 72, textAlign: 'center', padding: '6px 7px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 13, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div></div>;
+                    const isPrev = w.label === prevWeekLabel;
+                    return <div key={w.label} style={{ minWidth: 72, textAlign: 'center', padding: '6px 7px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : isPrev ? 'rgba(243,156,18,.12)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : isPrev ? `1px solid ${SE.gold}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 13, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div>{isSelected && <div style={{ fontSize: 7, color: SE.blue, fontWeight: 900, marginTop: 1 }}>CURRENT</div>}{isPrev && !isSelected && <div style={{ fontSize: 7, color: SE.gold, fontWeight: 900, marginTop: 1 }}>PREVIOUS</div>}</div>;
                   })}</div>
                 </div>}
               </div>

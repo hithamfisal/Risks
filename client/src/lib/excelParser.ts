@@ -63,6 +63,7 @@ export interface DashboardData {
   period: string;
   weeks: WeekData[];
   selectedWeek: string;
+  prevWeekLabel: string;
   kpis: {
     totalRisks: number;
     totalMitigation: number;
@@ -135,11 +136,20 @@ function deriveRating(score: number): string {
 
 function isWeekLabel(v: unknown): boolean {
   if (!v) return false;
-  const s = String(v);
-  return /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|APRIL|W\d)/i.test(s)
-    && s.length < 30
+  const s = String(v).trim();
+  // Must contain a month abbreviation followed by non-letter (e.g. 'Mar -', 'Apr-', 'APRIL-')
+  // OR contain W followed by a digit (e.g. W1, W2)
+  // This prevents matching names like 'Maya Stone' which contain 'May'
+  const hasMonth = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|APRIL)\b[\s\-\.]/i.test(s)
+    || /\bAPRIL\b/i.test(s);
+  const hasWeek = /\bW\d\b/i.test(s);
+  return (hasMonth || hasWeek)
+    && s.length < 35
     && !s.toLowerCase().includes('weight')
-    && !s.toLowerCase().includes('action');
+    && !s.toLowerCase().includes('action')
+    && !s.toLowerCase().includes('status')
+    && !s.toLowerCase().includes('target')
+    && !s.toLowerCase().includes('comment');
 }
 
 function deriveProgressStatus(pctVal: number): string {
@@ -178,7 +188,8 @@ function isNumericCell(v: unknown): boolean {
  */
 function buildWeekProgressMap(
   approved: unknown[][],
-  weeks: WeekData[]
+  weeks: WeekData[],
+  dataStartRow = 2
 ): {
   weekProgressMap: Record<string, Record<string, number>>;
   mitigationMap: Record<string, string[]>;
@@ -200,16 +211,20 @@ function buildWeekProgressMap(
 
   let currentRisk = '';
 
-  for (let i = 2; i < approved.length; i++) {
+  for (let i = dataStartRow; i < approved.length; i++) {
     const row = approved[i] as unknown[];
     const titleVal = safeStr(row[4]);
 
     if (titleVal) {
       currentRisk = titleVal;
-      // Initialize week progress map for this risk
+      // Read progress directly from the title row's week columns (same as Excel IFS formula)
       weekProgressMap[currentRisk] = {};
       for (const w of weeks) {
-        weekProgressMap[currentRisk][w.label] = 0;
+        const val = row[w.colIndex];
+        const numVal = (val !== null && val !== undefined && !String(val).startsWith('#'))
+          ? safeNum(val)
+          : 0;
+        weekProgressMap[currentRisk][w.label] = numVal;
       }
       // Store metadata from the title row
       ownerMap[currentRisk]       = safeStr(row[10]);
@@ -222,23 +237,7 @@ function buildWeekProgressMap(
 
     if (!currentRisk) continue;
 
-    // Get action weight (col S = idx 18)
-    const weightRaw = row[18];
-    if (weightRaw === null || weightRaw === undefined || String(weightRaw).startsWith('#')) continue;
-    const weight = safeNum(weightRaw);
-    if (weight <= 0) continue;
-
-    // Add weighted contribution for each week
-    for (const w of weeks) {
-      const val = row[w.colIndex];
-      if (val !== null && val !== undefined && !String(val).startsWith('#')) {
-        const numVal = safeNum(val);
-        weekProgressMap[currentRisk][w.label] =
-          (weekProgressMap[currentRisk][w.label] || 0) + weight * numVal;
-      }
-    }
-
-    // Collect action text (col R = idx 17)
+    // Collect action text from sub-rows (col R = idx 17)
     const action = safeStr(row[17]);
     if (action) {
       if (!mitigationMap[currentRisk]) mitigationMap[currentRisk] = [];
@@ -252,108 +251,76 @@ function buildWeekProgressMap(
 export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
 
-  // ── Output sheet ─────────────────────────────────────────────────────────
-  const outputSheet = wb.Sheets['Output'];
-  if (!outputSheet) throw new Error('Sheet "Output" not found in workbook.');
-  const out = XLSX.utils.sheet_to_json<unknown[]>(outputSheet, { header: 1, defval: null }) as unknown[][];
-
-  // Row 1 (idx 0): KPI values (avgRiskScore and avgRiskRating only — counts computed below)
-  const kpiRow = out[0] || [];
-  // AboveTarget = COUNTIF(H31:H82,">0") — col H (idx 7), rows 31-82 (idx 30-81)
-  const aboveTarget = out.slice(30, 82).filter(row => safeNum((row as unknown[])[7]) > 0).length;
-  // BelowTarget = COUNTIF(I31:I82,">0") — col I (idx 8), rows 31-82 (idx 30-81)
-  const belowTarget = out.slice(30, 82).filter(row => safeNum((row as unknown[])[8]) > 0).length;
-  // Avg Risk Score = AVERAGE(Output!C31:C123) — average of numeric values in col C rows 31-123
-  const avgScoreValues = out.slice(30, 123)
-    .map(row => (row as unknown[])[2])
-    .filter(v => v !== null && v !== undefined && v !== '' && !isNaN(Number(v)))
-    .map(v => Number(v));
-  const avgRiskScore = avgScoreValues.length > 0
-    ? Math.round((avgScoreValues.reduce((a, b) => a + b, 0) / avgScoreValues.length) * 10) / 10
-    : 0;
-  const avgRiskRating   = safeStr(kpiRow[5]) || deriveRating(avgRiskScore);
-
-  // Output zone counts can be stale if the Excel summary was not refreshed.
-  // Keep them only as a fallback; the dashboard uses the risk register as the source of truth.
-  const outputZoneCounts = {
-    veryHigh: safeNum(out[6]?.[3]),
-    high:     safeNum(out[7]?.[3]),
-    moderate: safeNum(out[8]?.[3]),
-    low:      safeNum(out[9]?.[3]),
-    veryLow:  safeNum(out[10]?.[3]),
-  };
-
-  // Progress counts: rows 21-23 (idx 20-22), col B (idx 1)
-  const progressCounts = {
-    completed:  safeNum(out[20]?.[1]),
-    inProgress: safeNum(out[21]?.[1]),
-    notStarted: safeNum(out[22]?.[1]),
-  };
-
-  // ── Approved TNOC Risk sheet ──────────────────────────────────────────────
+  // ── Only sheet needed: Approved TNOC Risk ────────────────────────────────
   const approvedSheet = wb.Sheets['Approved TNOC Risk'];
   if (!approvedSheet) throw new Error('Sheet "Approved TNOC Risk" not found in workbook.');
   const approved = XLSX.utils.sheet_to_json<unknown[]>(approvedSheet, { header: 1, defval: null }) as unknown[][];
-  // Total Risks = COUNT('Approved TNOC Risk'!A:A) — count numeric values in col A (idx 0)
+
+  // Total Risks = count of numeric values in col A (idx 0) — one per risk title row
   const totalRisks = approved.filter(row => isNumericCell((row as unknown[])[0])).length;
-  // Total Mitigation = COUNT('Approved TNOC Risk'!Q:Q) — count numeric values in col Q (idx 16)
+  // Total Mitigation = count of numeric values in col Q (idx 16) — one per action row
   const totalMitigation = approved.filter(row => isNumericCell((row as unknown[])[16])).length;
 
-  // Detect week columns from row 2 (idx 1) — cols X(23) onwards
-  const headerRow2 = approved[1] || [];
-  const weeks: WeekData[] = [];
-  for (let i = 23; i < Math.min((headerRow2 as unknown[]).length, 35); i++) {
-    const v = (headerRow2 as unknown[])[i];
-    if (isWeekLabel(v)) {
-      weeks.push({ label: safeStr(v), colIndex: i });
+  // Auto-detect the header row containing week labels — scan first 5 rows
+  // This handles files with 1 or 2 header rows regardless of structure
+  let headerRowIdx = 1; // default: row 2 (idx 1)
+  let weeks: WeekData[] = [];
+  for (let rowIdx = 0; rowIdx <= Math.min(4, approved.length - 1); rowIdx++) {
+    const candidateRow = approved[rowIdx] as unknown[];
+    const candidateWeeks: WeekData[] = [];
+    for (let i = 0; i < candidateRow.length; i++) {
+      if (isWeekLabel(candidateRow[i])) {
+        candidateWeeks.push({ label: safeStr(candidateRow[i]), colIndex: i });
+      }
+    }
+    if (candidateWeeks.length > weeks.length) {
+      weeks = candidateWeeks;
+      headerRowIdx = rowIdx;
     }
   }
+  const dataStartRow = headerRowIdx + 1; // data rows start after the header row
 
-  // Selected week = AW1 (col 48, row 1)
-  const aw1 = safeStr((approved[0] as unknown[])?.[48]);
-  const selectedWeek = aw1 || (weeks.length > 0 ? weeks[weeks.length - 1].label : 'Current');
+  // Auto-detect current week: always use the last detected week column (no helper columns needed)
+  const selectedWeek = weeks.length > 0 ? weeks[weeks.length - 1].label : 'Current';
 
-  // Previous week = BB1 (col 53, row 1)
-  const bb1 = safeStr((approved[0] as unknown[])?.[53]);
+  // Auto-detect previous week: the week immediately before current in the detected week list
+  // No need to read col BC — computed entirely from the week headers
+  const selectedWeekIdx = weeks.findIndex(w => w.label === selectedWeek);
+  const prevWeekLabel = selectedWeekIdx > 0
+    ? weeks[selectedWeekIdx - 1].label
+    : (weeks.length > 1 ? weeks[weeks.length - 2].label : selectedWeek);
 
   // ── Build per-risk per-week progress using weighted sum ───────────────────
   const { weekProgressMap, mitigationMap, ownerMap, scoreMap, ratingMap, closingDateMap, likelihoodMap, impactMap } =
-    buildWeekProgressMap(approved, weeks);
+    buildWeekProgressMap(approved, weeks, dataStartRow);
 
-  // ── Build risk register from Output rows 31+ (for ordering and metadata) ──
-  const selectedWeekIdx = weeks.findIndex(w => w.label === selectedWeek);
-  const prevWeekLabel   = bb1 || (selectedWeekIdx > 0 ? weeks[selectedWeekIdx - 1].label : selectedWeek);
+  // ── Build risk register entirely from Approved TNOC Risk ─────────────────
 
   const riskRegister: RiskRow[] = [];
 
-  for (let i = 30; i < out.length; i++) {
-    const row = out[i] || [];
-    const title = safeStr(row[0]);
-    if (!title) continue;
-
-    // Get metadata — prefer from Approved TNOC Risk (more complete), fall back to Output
-    const score  = scoreMap[title]  ?? safeNum(row[2]);
-    const rating = ratingMap[title] ?? safeStr(row[3]) ?? deriveRating(score);
-    const owner  = ownerMap[title]  ?? safeStr(row[1]);
-    const quarter = closingDateMap[title] ?? safeStr(row[4]);
-
-    // Get per-week progress from weighted sum map
+  // Iterate over risk title rows (col A numeric = risk number, col E = title)
+  const riskTitles = Object.keys(weekProgressMap);
+  riskTitles.forEach((title, idx) => {
+    const score  = scoreMap[title]  ?? 0;
+    const rating = ratingMap[title] ?? deriveRating(score);
+    const owner  = ownerMap[title]  ?? '';
+    const quarter = closingDateMap[title] ?? '';
     const weekProgress = weekProgressMap[title] || {};
 
-    // Current week value
-    const curVal  = weekProgress[selectedWeek]  ?? safeNum(row[6]);
-    const prevVal = weekProgress[prevWeekLabel] ?? safeNum(row[9]) ?? curVal;
+    const curVal  = weekProgress[selectedWeek]  ?? 0;
+    const prevVal = weekProgress[prevWeekLabel] ?? curVal;
 
     const currentPct     = pct(curVal);
     const beforePct      = pct(prevVal);
     const developmentPct = Math.round((curVal - prevVal) * 100);
-    // Read AboveTarget and BelowTarget directly from Output sheet col H (idx 7) and I (idx 8)
-    // matching Excel COUNTIF(H31:H82,">0") and COUNTIF(I31:I82,">0")
-    const aboveFlag      = safeNum(row[7]) > 0;
-    const belowFlag      = safeNum(row[8]) > 0;
+
+    // Above Target: current progress >= target (col AB idx 27 on title row)
+    // Computed internally: risk is above target if currentPct >= 100 or progress improved vs before
+    const aboveFlag = currentPct >= 100;
+    const belowFlag = currentPct < 100 && curVal <= prevVal;
 
     riskRegister.push({
-      id: `risk-${i}`,
+      id: `risk-${idx}`,
       title,
       owner,
       score,
@@ -370,23 +337,32 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       likelihood: likelihoodMap[title] ?? 0,
       impact: impactMap[title] ?? 0,
     });
-  }
+  });
 
-  // Use the final risk register as one source of truth for dashboard totals.
-  // This keeps the Total Risks KPI equal to Risk Categories donut total.
-  const registerTotalRisks = riskRegister.length || totalRisks;
-  const computedZoneCounts = computeZoneCountsFromRisks(riskRegister);
-  const computedZoneTotal = Object.values(computedZoneCounts).reduce((sum, value) => sum + value, 0);
-  const outputZoneTotal = Object.values(outputZoneCounts).reduce((sum, value) => sum + value, 0);
-  const finalZoneCounts = computedZoneTotal > 0 ? computedZoneCounts : outputZoneCounts;
-  const finalTotalRisks = computedZoneTotal > 0 ? computedZoneTotal : (outputZoneTotal || registerTotalRisks);
+  // ── All calculations done internally ─────────────────────────────────────
+  const finalTotalRisks = riskRegister.length || totalRisks;
 
-  // Above/Below Target are risk KPIs, so their denominator must be Total Risks.
-  // This keeps: Above Target + Below Target = Total Risks.
-  // Above Target comes from the Excel Output sheet col H flags; Below Target is the remaining risks.
-  const finalAboveTarget = Math.min(finalTotalRisks, Math.max(aboveTarget, 0));
-  const finalBelowTarget = Math.max(finalTotalRisks - finalAboveTarget, 0);
+  // Zone counts from risk scores
+  const finalZoneCounts = computeZoneCountsFromRisks(riskRegister);
+
+  // Avg risk score from register
+  const scoreValues = riskRegister.map(r => r.score).filter(s => s > 0);
+  const avgRiskScore = scoreValues.length > 0
+    ? Math.round((scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length) * 10) / 10
+    : 0;
+  const avgRiskRating = deriveRating(avgRiskScore);
+
+  // Above/Below Target from register
+  const finalAboveTarget = riskRegister.filter(r => r.aboveTarget).length;
+  const finalBelowTarget = riskRegister.filter(r => r.belowTarget).length;
   const riskSummary = buildRiskSummary(finalAboveTarget, finalBelowTarget);
+
+  // Progress counts from register
+  const progressCounts = {
+    completed:  riskRegister.filter(r => r.currentPct >= 100).length,
+    inProgress: riskRegister.filter(r => r.currentPct > 0 && r.currentPct < 100).length,
+    notStarted: riskRegister.filter(r => r.currentPct === 0).length,
+  };
 
   const selectedRisk = riskRegister.find(r => r.rating === 'Very High') || riskRegister[0] || null;
 
@@ -394,6 +370,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
     period: selectedWeek,
     weeks,
     selectedWeek,
+    prevWeekLabel,
     kpis: {
       totalRisks: finalTotalRisks,
       totalMitigation,
@@ -465,6 +442,7 @@ export function switchWeek(data: DashboardData, newWeek: string): DashboardData 
     ...data,
     period: newWeek,
     selectedWeek: newWeek,
+    prevWeekLabel: prevWeek,
     kpis: {
       ...data.kpis,
       totalRisks,
@@ -570,6 +548,7 @@ export function getSampleData(): DashboardData {
     period: 'APRIL- W2 (13/4)',
     weeks,
     selectedWeek: 'APRIL- W2 (13/4)',
+    prevWeekLabel: 'APRIL- W1 (6/4)',
     kpis: { totalRisks: 28, totalMitigation: 61, aboveTarget: 16, belowTarget: 12, avgRiskScore: 14, avgRiskRating: 'Moderate' },
     zoneCounts: { veryHigh: 2, high: 14, moderate: 12, low: 0, veryLow: 0 },
     progressCounts: { completed: 8, inProgress: 20, notStarted: 0 },
