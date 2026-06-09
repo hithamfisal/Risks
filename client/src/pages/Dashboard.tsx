@@ -919,10 +919,10 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 </ResponsiveContainer> : <div style={{ height: 250, display: 'grid', placeItems: 'center', color: SE.green, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>No overdue open mitigations detected</div>}
               </div>
 
-              <div style={chartBox(palette)}>
+              <div style={{ ...chartBox(palette), gridColumn: 'span 2' }}>
                 <h3 style={chartTitle(palette)}>Mitigation Progress Detail — {selectedWeek || period}</h3>
-                <div style={{ maxHeight: 250, overflowY: 'auto', paddingRight: 4 }}>
-                  <ResponsiveContainer width="100%" height={Math.max(240, detailData.length * 22)}>
+                <div style={{ paddingRight: 4 }}>
+                  <ResponsiveContainer width="100%" height={Math.max(240, detailData.length * 28)}>
                     <BarChart data={detailData} layout="vertical" margin={{ top: 4, right: 54, left: 6, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
                       <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
