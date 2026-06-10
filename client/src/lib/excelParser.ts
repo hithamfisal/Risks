@@ -1,8 +1,8 @@
 /**
- * TNOC Risk Register Excel Parser — Correct Weighted Sum Formula
+ * Risk Register Excel Parser — Correct Weighted Sum Formula
  *
  * ── How per-risk progress is calculated ─────────────────────────────────────
- * Each risk has multiple action rows in "Approved TNOC Risk" sheet.
+ * Each risk has multiple action rows in "Approved Risk" sheet.
  * Each action row has:
  *   col S (idx 18) = Action Weight (decimal, e.g. 0.5)
  *   col X (idx 23) = Mar - W4 progress (0.0–1.0)
@@ -22,7 +22,7 @@
  *   A=Title, B=Owner, C=Score, D=Rating, E=Quarter
  *   G=CurrentWeek%, H=AboveTarget, I=BelowTarget, J=WeekBefore%, K=Development%
  *
- * ── Approved TNOC Risk sheet ────────────────────────────────────────────────
+ * ── Approved Risk sheet ────────────────────────────────────────────────
  * Row 1 (idx 0): AW (col 48) = current week label, BB (col 53) = prev week label
  * Row 2 (idx 1): sub-headers — X(23)=week1, Y(24)=week2, Z(25)=week3, AA(26)=week4
  * Row 3+ (idx 2+): data rows
@@ -37,7 +37,7 @@ import * as XLSX from 'xlsx';
 
 export interface WeekData {
   label: string;
-  colIndex: number;  // 0-based column index in Approved TNOC Risk sheet
+  colIndex: number;  // 0-based column index in Approved Risk sheet
 }
 
 export interface RiskRow {
@@ -160,12 +160,12 @@ function deriveProgressStatus(pctVal: number): string {
 
 function computeZoneCountsFromRisks(risks: RiskRow[]): DashboardData['zoneCounts'] {
   return risks.reduce<DashboardData['zoneCounts']>((acc, risk) => {
-    const rating = safeStr(risk.rating) || deriveRating(risk.score);
-    if (/very\s*high/i.test(rating) || risk.score >= 20) acc.veryHigh += 1;
-    else if (/high/i.test(rating) || risk.score >= 15) acc.high += 1;
-    else if (/moderate/i.test(rating) || risk.score >= 9) acc.moderate += 1;
-    else if (/low/i.test(rating) || risk.score >= 5) acc.low += 1;
-    else acc.veryLow += 1;
+    const rating = (safeStr(risk.rating) || deriveRating(risk.score)).toLowerCase().trim();
+    if (rating.includes('very high') || risk.score >= 20) acc.veryHigh += 1;
+    else if (rating.includes('very low') || risk.score < 5) acc.veryLow += 1;
+    else if (rating.includes('high') || risk.score >= 15) acc.high += 1;
+    else if (rating.includes('moderate') || risk.score >= 9) acc.moderate += 1;
+    else acc.low += 1;
     return acc;
   }, { veryHigh: 0, high: 0, moderate: 0, low: 0, veryLow: 0 });
 }
@@ -458,7 +458,7 @@ export function switchWeek(data: DashboardData, newWeek: string): DashboardData 
   };
 }
 
-// ── Sample data ────────────────────────────────────────────────────────────
+// ── Sample data (from RiskRegisterSample.xlsx) ─────────────────────────────
 export function getSampleData(): DashboardData {
   const weeks: WeekData[] = [
     { label: 'Mar - W4 (24/3)', colIndex: 23 },
@@ -469,78 +469,164 @@ export function getSampleData(): DashboardData {
 
   const sampleRisks: RiskRow[] = [
     {
-      id: '1', title: 'Visibility Risk', owner: '(Mustafa)', score: 12, rating: 'Moderate',
-      closingDate: 'Q1 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Connect the other 6 areas in EOA to ERCC.\n2- Follow up with Telecom on connectivity.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.805, 'Mar - W5 (31/3)': 0.815, 'APRIL- W1 (6/4)': 0.825, 'APRIL- W2 (13/4)': 0.835 },
-      currentPct: 84, beforePct: 83, developmentPct: 1, aboveTarget: false, belowTarget: false, likelihood: 4, impact: 3,
-    },
-    {
-      id: '2', title: 'HPAs High Temperature, Overrated Transmit RF Power and Critical Alarms issues',
-      owner: '(IHAB)', score: 20, rating: 'Very High', closingDate: 'Q4 2026',
-      progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Cooling system in outdoor cabinet.\n2- Cooling Enhancement.\n3- Firmware Rectification.\n4- Transition to SSPA.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.67, 'Mar - W5 (31/3)': 0.67, 'APRIL- W1 (6/4)': 0.67, 'APRIL- W2 (13/4)': 0.67 },
-      currentPct: 67, beforePct: 67, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 5, impact: 4,
-    },
-    {
-      id: '3', title: 'Inadequate vendor support and challenges in IPG Phonetics services',
-      owner: '(KARAM)', score: 16, rating: 'High', closingDate: 'Q4 2026',
-      progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Escalate to vendor management.\n2- Identify alternative vendors.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.684, 'Mar - W5 (31/3)': 0.684, 'APRIL- W1 (6/4)': 0.684, 'APRIL- W2 (13/4)': 0.684 },
-      currentPct: 68, beforePct: 68, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 4, impact: 4,
-    },
-    {
-      id: '4', title: 'COA, Lack of IP/MPLS expert', owner: '(Abu Deem)', score: 16, rating: 'High',
+      id: '1', title: 'Data Quality and Reporting Risk',
+      owner: 'Maya Stone', score: 12, rating: 'Moderate',
       closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Hire IP/MPLS specialist.\n2- Training program.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.635, 'Mar - W5 (31/3)': 0.635, 'APRIL- W1 (6/4)': 0.635, 'APRIL- W2 (13/4)': 0.635 },
-      currentPct: 64, beforePct: 64, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 4, impact: 4,
+      mitigation: '1. Implement monitoring report and review cycle.\n2. Perform field inspection and close corrective actions.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.42, 'Mar - W5 (31/3)': 0.45, 'APRIL- W1 (6/4)': 0.51, 'APRIL- W2 (13/4)': 0.50 },
+      currentPct: 50, beforePct: 51, developmentPct: -1, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 3,
     },
     {
-      id: '5', title: 'Manpower & Monitoring NMS/systems at WOA & EOA', owner: '(A. Saif)', score: 12, rating: 'Moderate',
+      id: '2', title: 'Documentation Accuracy Risk',
+      owner: 'Nora Adams', score: 9, rating: 'Moderate',
+      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Coordinate with supplier and agree delivery schedule.\n2. Automate weekly KPI report and publish to portal.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.00, 'Mar - W5 (31/3)': 0.01, 'APRIL- W1 (6/4)': 0.02, 'APRIL- W2 (13/4)': 0.02 },
+      currentPct: 2, beforePct: 2, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 3,
+    },
+    {
+      id: '3', title: 'Access Control Compliance Risk',
+      owner: 'Hana Blake', score: 20, rating: 'Very High',
       closingDate: 'Q1 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Deploy NMS monitoring solution.\n2- Assign dedicated team.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.75, 'Mar - W5 (31/3)': 0.78, 'APRIL- W1 (6/4)': 0.80, 'APRIL- W2 (13/4)': 0.80 },
-      currentPct: 80, beforePct: 80, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 3, impact: 4,
+      mitigation: '1. Enforce MFA on all critical systems.\n2. Conduct quarterly access reviews.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.30, 'Mar - W5 (31/3)': 0.28, 'APRIL- W1 (6/4)': 0.38, 'APRIL- W2 (13/4)': 0.38 },
+      currentPct: 38, beforePct: 38, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 4,
     },
     {
-      id: '6', title: 'Tickets Remaining Open Without Closure', owner: '(Abu Fatimah)', score: 15, rating: 'High',
-      closingDate: 'Q4 2025', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Implement ticket closure policy.\n2- Weekly review meetings.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.85, 'Mar - W5 (31/3)': 0.88, 'APRIL- W1 (6/4)': 0.90, 'APRIL- W2 (13/4)': 0.90 },
-      currentPct: 90, beforePct: 90, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 3, impact: 5,
+      id: '4', title: 'Incident Response Delay Risk',
+      owner: 'Lina Brooks', score: 1, rating: 'Very Low',
+      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Define SLA for incident response.\n2. Automate escalation workflows.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.00, 'Mar - W5 (31/3)': 0.00, 'APRIL- W1 (6/4)': 0.00, 'APRIL- W2 (13/4)': 0.02 },
+      currentPct: 2, beforePct: 0, developmentPct: 2, aboveTarget: false, belowTarget: true, likelihood: 1, impact: 1,
     },
     {
-      id: '7', title: 'WOA, Non Compatibility of hit7050 with the existing NMS',
-      owner: '(Abu Amar)', score: 20, rating: 'Very High', closingDate: 'Q2 2026',
-      progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Upgrade NMS to support hit7050.\n2- Coordinate with vendor.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.65, 'Mar - W5 (31/3)': 0.68, 'APRIL- W1 (6/4)': 0.70, 'APRIL- W2 (13/4)': 0.70 },
-      currentPct: 70, beforePct: 70, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 4, impact: 5,
+      id: '5', title: 'Access Control Compliance Risk (Secondary)',
+      owner: 'Maya Stone', score: 12, rating: 'Moderate',
+      closingDate: 'Q4 2026', progressStatus: 'Not Started (0%)',
+      mitigation: '1. Review user provisioning process.\n2. Implement role-based access control.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.00, 'Mar - W5 (31/3)': 0.00, 'APRIL- W1 (6/4)': 0.01, 'APRIL- W2 (13/4)': 0.00 },
+      currentPct: 0, beforePct: 1, developmentPct: -1, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 3,
     },
     {
-      id: '8', title: 'Lack of change management Database', owner: '(Abu Abdulrahman)', score: 9, rating: 'Moderate',
-      closingDate: 'Q4 2025', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Implement CMDB solution.\n2- Define change management process.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.25, 'Mar - W5 (31/3)': 0.28, 'APRIL- W1 (6/4)': 0.30, 'APRIL- W2 (13/4)': 0.30 },
-      currentPct: 30, beforePct: 30, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 3, impact: 3,
+      id: '6', title: 'Inventory Shortage Risk',
+      owner: 'Nora Adams', score: 16, rating: 'High',
+      closingDate: 'Q2 2026', progressStatus: 'Completed (100%)',
+      mitigation: '1. Establish safety stock levels.\n2. Diversify supplier base.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.94, 'Mar - W5 (31/3)': 0.94, 'APRIL- W1 (6/4)': 0.93, 'APRIL- W2 (13/4)': 1.00 },
+      currentPct: 100, beforePct: 93, developmentPct: 7, aboveTarget: true, belowTarget: false, likelihood: 4, impact: 4,
     },
     {
-      id: '9', title: 'WOA, Manual NEs Backup', owner: '(Abu Amar)', score: 15, rating: 'High',
-      closingDate: 'Q4 2025', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1- Automate NE backup process.\n2- Schedule regular backups.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.20, 'Mar - W5 (31/3)': 0.23, 'APRIL- W1 (6/4)': 0.27, 'APRIL- W2 (13/4)': 0.27 },
-      currentPct: 27, beforePct: 27, developmentPct: 0, aboveTarget: false, belowTarget: false, likelihood: 3, impact: 5,
+      id: '7', title: 'Service Desk Workload Risk',
+      owner: 'Omar Reed', score: 12, rating: 'Moderate',
+      closingDate: 'Q2 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Hire additional service desk agents.\n2. Implement self-service portal.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.59, 'Mar - W5 (31/3)': 0.57, 'APRIL- W1 (6/4)': 0.54, 'APRIL- W2 (13/4)': 0.64 },
+      currentPct: 64, beforePct: 54, developmentPct: 10, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 3,
     },
     {
-      id: '10', title: 'Lack of Backup Fiber Connectivity in Najran Region',
-      owner: '(Abu Noura)', score: 12, rating: 'Moderate', closingDate: 'Q4 2025',
-      progressStatus: 'Completed (100%)',
-      mitigation: '1- Survey alternative fiber routes.\n2- Negotiate with providers.',
-      weekProgress: { 'Mar - W4 (24/3)': 0.95, 'Mar - W5 (31/3)': 0.98, 'APRIL- W1 (6/4)': 1.0, 'APRIL- W2 (13/4)': 1.0 },
-      currentPct: 100, beforePct: 100, developmentPct: 0, aboveTarget: true, belowTarget: false, likelihood: 3, impact: 4,
+      id: '8', title: 'Contract Renewal Delay Risk',
+      owner: 'Samir Hale', score: 9, rating: 'Moderate',
+      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Set 90-day renewal reminders.\n2. Assign contract manager per vendor.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.60, 'Mar - W5 (31/3)': 0.59, 'APRIL- W1 (6/4)': 0.56, 'APRIL- W2 (13/4)': 0.60 },
+      currentPct: 60, beforePct: 56, developmentPct: 4, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 3,
+    },
+    {
+      id: '9', title: 'Data Quality and Reporting Risk (Secondary)',
+      owner: 'Omar Reed', score: 9, rating: 'Moderate',
+      closingDate: 'Q2 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Implement data validation rules.\n2. Schedule monthly data audits.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.73, 'Mar - W5 (31/3)': 0.78, 'APRIL- W1 (6/4)': 0.75, 'APRIL- W2 (13/4)': 0.72 },
+      currentPct: 72, beforePct: 75, developmentPct: -3, aboveTarget: true, belowTarget: false, likelihood: 3, impact: 3,
+    },
+    {
+      id: '10', title: 'Contract Renewal Delay Risk (Secondary)',
+      owner: 'Grace Miller', score: 9, rating: 'Moderate',
+      closingDate: 'Q3 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Centralise contract repository.\n2. Automate renewal notifications.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.78, 'Mar - W5 (31/3)': 0.79, 'APRIL- W1 (6/4)': 0.71, 'APRIL- W2 (13/4)': 0.76 },
+      currentPct: 76, beforePct: 71, developmentPct: 5, aboveTarget: true, belowTarget: false, likelihood: 3, impact: 3,
+    },
+    {
+      id: '11', title: 'Backup Power Availability Risk',
+      owner: 'Samir Hale', score: 20, rating: 'Very High',
+      closingDate: 'Q3 2026', progressStatus: 'Not Started (0%)',
+      mitigation: '1. Install UPS at critical sites.\n2. Test generator failover monthly.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.01, 'Mar - W5 (31/3)': 0.00, 'APRIL- W1 (6/4)': 0.00, 'APRIL- W2 (13/4)': 0.00 },
+      currentPct: 0, beforePct: 0, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 4,
+    },
+    {
+      id: '12', title: 'Contract Renewal Delay Risk (Tertiary)',
+      owner: 'Grace Miller', score: 25, rating: 'Very High',
+      closingDate: 'Q2 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Escalate to procurement leadership.\n2. Engage legal for fast-track renewal.',
+      weekProgress: { 'Mar - W4 (24/3)': 1.00, 'Mar - W5 (31/3)': 0.97, 'APRIL- W1 (6/4)': 0.98, 'APRIL- W2 (13/4)': 0.96 },
+      currentPct: 96, beforePct: 98, developmentPct: -2, aboveTarget: true, belowTarget: false, likelihood: 5, impact: 5,
+    },
+    {
+      id: '13', title: 'Critical Spare Parts Availability Risk',
+      owner: 'Omar Reed', score: 1, rating: 'Very Low',
+      closingDate: 'Q2 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Maintain minimum spare parts inventory.\n2. Negotiate expedited delivery SLAs.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.45, 'Mar - W5 (31/3)': 0.38, 'APRIL- W1 (6/4)': 0.50, 'APRIL- W2 (13/4)': 0.38 },
+      currentPct: 38, beforePct: 50, developmentPct: -12, aboveTarget: false, belowTarget: true, likelihood: 1, impact: 1,
+    },
+    {
+      id: '14', title: 'Inventory Shortage Risk (Secondary)',
+      owner: 'Grace Miller', score: 25, rating: 'Very High',
+      closingDate: 'Q2 2026', progressStatus: 'Completed (100%)',
+      mitigation: '1. Implement just-in-time inventory model.\n2. Set up automated reorder triggers.',
+      weekProgress: { 'Mar - W4 (24/3)': 1.00, 'Mar - W5 (31/3)': 0.96, 'APRIL- W1 (6/4)': 0.93, 'APRIL- W2 (13/4)': 1.00 },
+      currentPct: 100, beforePct: 93, developmentPct: 7, aboveTarget: true, belowTarget: false, likelihood: 5, impact: 5,
+    },
+    {
+      id: '15', title: 'Service Desk Workload Risk (Secondary)',
+      owner: 'Nora Adams', score: 9, rating: 'Moderate',
+      closingDate: 'Q3 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Redistribute ticket queues by priority.\n2. Introduce chatbot for Tier-1 support.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.47, 'Mar - W5 (31/3)': 0.41, 'APRIL- W1 (6/4)': 0.46, 'APRIL- W2 (13/4)': 0.46 },
+      currentPct: 46, beforePct: 46, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 3,
+    },
+    {
+      id: '16', title: 'Data Quality and Reporting Risk (Tertiary)',
+      owner: 'Rami Cole', score: 4, rating: 'Very Low',
+      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Deploy data lineage tracking tool.\n2. Establish data stewardship roles.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.79, 'Mar - W5 (31/3)': 0.79, 'APRIL- W1 (6/4)': 0.72, 'APRIL- W2 (13/4)': 0.71 },
+      currentPct: 71, beforePct: 72, developmentPct: -1, aboveTarget: true, belowTarget: false, likelihood: 2, impact: 2,
+    },
+    {
+      id: '17', title: 'Supplier Delivery Delay Risk',
+      owner: 'Hana Blake', score: 16, rating: 'High',
+      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Add penalty clauses for late delivery.\n2. Identify backup suppliers.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.38, 'Mar - W5 (31/3)': 0.28, 'APRIL- W1 (6/4)': 0.40, 'APRIL- W2 (13/4)': 0.34 },
+      currentPct: 34, beforePct: 40, developmentPct: -6, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 4,
+    },
+    {
+      id: '18', title: 'Patch Management Delay Risk',
+      owner: 'Maya Stone', score: 6, rating: 'Low',
+      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Automate patch deployment pipeline.\n2. Schedule monthly patching windows.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.78, 'Mar - W5 (31/3)': 0.67, 'APRIL- W1 (6/4)': 0.68, 'APRIL- W2 (13/4)': 0.65 },
+      currentPct: 65, beforePct: 68, developmentPct: -3, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 2,
+    },
+    {
+      id: '19', title: 'Network Capacity Saturation Risk',
+      owner: 'Nora Adams', score: 25, rating: 'Very High',
+      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Upgrade core network capacity.\n2. Implement traffic shaping policies.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.30, 'Mar - W5 (31/3)': 0.17, 'APRIL- W1 (6/4)': 0.29, 'APRIL- W2 (13/4)': 0.19 },
+      currentPct: 19, beforePct: 29, developmentPct: -10, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 5,
+    },
+    {
+      id: '20', title: 'Patch Management Delay Risk (Secondary)',
+      owner: 'Nora Adams', score: 20, rating: 'Very High',
+      closingDate: 'Q2 2026', progressStatus: 'In Progress (1-99%)',
+      mitigation: '1. Prioritise critical patches by CVSS score.\n2. Enforce patch compliance reporting.',
+      weekProgress: { 'Mar - W4 (24/3)': 0.38, 'Mar - W5 (31/3)': 0.35, 'APRIL- W1 (6/4)': 0.32, 'APRIL- W2 (13/4)': 0.26 },
+      currentPct: 26, beforePct: 32, developmentPct: -6, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 4,
     },
   ];
 
@@ -549,14 +635,14 @@ export function getSampleData(): DashboardData {
     weeks,
     selectedWeek: 'APRIL- W2 (13/4)',
     prevWeekLabel: 'APRIL- W1 (6/4)',
-    kpis: { totalRisks: 28, totalMitigation: 61, aboveTarget: 16, belowTarget: 12, avgRiskScore: 14, avgRiskRating: 'Moderate' },
-    zoneCounts: { veryHigh: 2, high: 14, moderate: 12, low: 0, veryLow: 0 },
-    progressCounts: { completed: 8, inProgress: 20, notStarted: 0 },
+    kpis: { totalRisks: 20, totalMitigation: 40, aboveTarget: 6, belowTarget: 14, avgRiskScore: 13, avgRiskRating: 'Moderate' },
+    zoneCounts: { veryHigh: 6, high: 2, moderate: 8, low: 1, veryLow: 3 },
+    progressCounts: { completed: 2, inProgress: 16, notStarted: 2 },
     riskSummary: [
-      { name: 'Above Target', value: 16, color: '#27AE60' },
-      { name: 'Below Target', value: 12, color: '#C0392B' },
+      { name: 'Above Target', value: 6, color: '#27AE60' },
+      { name: 'Below Target', value: 14, color: '#C0392B' },
     ],
     riskRegister: sampleRisks,
-    selectedRisk: sampleRisks[1],
+    selectedRisk: sampleRisks[2],
   };
 }

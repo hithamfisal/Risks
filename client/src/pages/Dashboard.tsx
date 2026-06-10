@@ -18,14 +18,14 @@ import * as XLSX from 'xlsx';
 import {
   Upload, Printer, TrendingUp, TrendingDown, Minus, Filter, X, BarChart2,
   ChevronDown, ChevronRight, Home, ImageDown, FileSpreadsheet, Search,
-  RotateCcw, Download, Eye, EyeOff,
+  RotateCcw, Download, Eye, EyeOff, Moon, Sun,
 } from 'lucide-react';
 import { DashboardData, getScoreColor, getRatingColor, type RiskRow } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const HEADER_LEFT_LOGOS = [
-  { src: '/assets/map-logo.png', alt: 'TNOC', height: 34 },
+  { src: '/assets/map-logo.png', alt: 'Map', height: 34 },
   { src: '/assets/se-logo.png', alt: 'Saudi Energy', height: 38 },
 ];
 const NASCO_LOGO = { src: '/assets/nasco-logo.png', alt: 'NASCO', height: 44 };
@@ -204,13 +204,56 @@ function ChartTooltip({ active, payload, label, palette }: { active?: boolean; p
 
 function getDateValue(value: string): number | null {
   if (!value) return null;
+
+  // 1. Quarter strings: Q1 2026, q2-2025, Q3/2024, etc.
+  //    Q1 → Mar 31 | Q2 → Jun 30 | Q3 → Sep 30 | Q4 → Dec 31
+  const quarterMatch = value.match(/[Qq]([1-4])[\s\-\/]*(\d{4})/);
+  if (quarterMatch) {
+    const q = Number(quarterMatch[1]);
+    const yr = Number(quarterMatch[2]);
+    const quarterEnd: [number, number][] = [
+      [2, 31],   // Q1 → March 31
+      [5, 30],   // Q2 → June 30
+      [8, 30],   // Q3 → September 30
+      [11, 31],  // Q4 → December 31
+    ];
+    const [month, day] = quarterEnd[q - 1];
+    return new Date(yr, month, day).getTime();
+  }
+
+  // 2. Standard ISO / browser-parseable strings (e.g. "2026-06-01", "June 2026", "01 Jan 2026")
   const parsed = Date.parse(value);
   if (!Number.isNaN(parsed)) return parsed;
-  const match = value.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
-  if (!match) return null;
-  const [, d, m, y] = match;
-  const year = y.length === 2 ? Number(`20${y}`) : Number(y);
-  return new Date(year, Number(m) - 1, Number(d)).getTime();
+
+  // 3. dd/mm/yyyy or dd-mm-yyyy (European format)
+  const dmyMatch = value.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  if (dmyMatch) {
+    const [, d, m, y] = dmyMatch;
+    const year = y.length === 2 ? Number(`20${y}`) : Number(y);
+    return new Date(year, Number(m) - 1, Number(d)).getTime();
+  }
+
+  // 4. Month-name formats: "Jan 2026", "January 2026", "2026 Jan"
+  const monthNames: Record<string, number> = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    january: 0, february: 1, march: 2, april: 3, june: 5,
+    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+  };
+  const monthYearMatch = value.match(/([A-Za-z]+)[\s,\-]+(\d{4})|(\d{4})[\s,\-]+([A-Za-z]+)/);
+  if (monthYearMatch) {
+    const monthStr = (monthYearMatch[1] || monthYearMatch[4] || '').toLowerCase();
+    const yearStr  = monthYearMatch[2] || monthYearMatch[3];
+    const month = monthNames[monthStr];
+    if (month !== undefined && yearStr) {
+      // Use last day of that month
+      const yr = Number(yearStr);
+      const lastDay = new Date(yr, month + 1, 0).getDate();
+      return new Date(yr, month, lastDay).getTime();
+    }
+  }
+
+  return null;
 }
 
 function normalise(text: string) {
@@ -455,7 +498,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const registerRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
 
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
   const palette = useMemo(() => makePalette(isDark), [isDark]);
   const themeBg = isDark ? '/assets/dark.png' : '/assets/light.png';
@@ -510,14 +553,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   }, [riskRegister]);
 
   const donutData = useMemo(() => [
-    { name: 'Very High', value: zoneCounts.veryHigh, color: ZONE_COLORS['Very High'] },
-    { name: 'High', value: zoneCounts.high, color: ZONE_COLORS.High },
-    { name: 'Moderate', value: zoneCounts.moderate, color: ZONE_COLORS.Moderate },
-    { name: 'Low', value: zoneCounts.low, color: ZONE_COLORS.Low },
-    { name: 'Very Low', value: zoneCounts.veryLow, color: ZONE_COLORS['Very Low'] },
-  ].filter(d => d.value > 0), [zoneCounts]);
+    { name: 'Very High', value: zoneCounts.veryHigh, displayValue: zoneCounts.veryHigh, color: ZONE_COLORS['Very High'] },
+    { name: 'High', value: zoneCounts.high, displayValue: zoneCounts.high, color: ZONE_COLORS.High },
+    { name: 'Moderate', value: zoneCounts.moderate, displayValue: zoneCounts.moderate, color: ZONE_COLORS.Moderate },
+    { name: 'Low', value: zoneCounts.low, displayValue: zoneCounts.low, color: ZONE_COLORS.Low },
+    { name: 'Very Low', value: zoneCounts.veryLow, displayValue: zoneCounts.veryLow, color: ZONE_COLORS['Very Low'] },
+  // Give 0-value slices a minimum of 0.3 so Recharts renders a thin visible arc
+  ].map(d => ({ ...d, value: d.value === 0 ? 0.3 : d.value })), [zoneCounts]);
 
-  const categoryTotal = donutData.reduce((sum, d) => sum + d.value, 0);
+  const categoryTotal = donutData.reduce((sum, d) => sum + (d.displayValue ?? d.value), 0);
 
   const weeklyMovementData = useMemo(() => weeks.map((w, index) => {
     const values = riskRegister.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
@@ -643,7 +687,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Risk Register');
-    XLSX.writeFile(wb, `TNOC_Risk_Register_${selectedWeek || period}.xlsx`);
+    XLSX.writeFile(wb, `Risk_Register_${selectedWeek || period}.xlsx`);
   }, [filteredRisks, selectedWeek, period]);
 
   const visibleSectionIds = useMemo(() => {
@@ -714,47 +758,173 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
 
       <div ref={dashboardRef} className="dashboard-shell" style={{ minHeight: '100vh', backgroundColor: palette.page, fontFamily: 'Inter, sans-serif', color: palette.text }}>
+
+        {/* ═══════════════ BANNER (above sticky header) ═══════════════ */}
+        <div style={{ width: '100%', background: 'linear-gradient(135deg, #020f2e 0%, #041a4a 40%, #0a1f5c 60%, #0d0a1e 100%)', position: 'relative', overflow: 'hidden', minHeight: 140, display: 'flex', alignItems: 'center', padding: '0 32px', gap: 24 }}>
+          <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 1200 140" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+            {Array.from({length: 18}).map((_,col) => Array.from({length: 5}).map((_,row) => (<circle key={`d-${col}-${row}`} cx={col*70+35} cy={row*30+15} r="1.2" fill="rgba(30,144,255,0.25)" />)))}
+            <line x1="0" y1="35" x2="340" y2="35" stroke="rgba(0,206,209,0.35)" strokeWidth="1" />
+            <line x1="0" y1="105" x2="280" y2="105" stroke="rgba(0,206,209,0.2)" strokeWidth="0.8" />
+            <line x1="860" y1="35" x2="1200" y2="35" stroke="rgba(192,57,43,0.3)" strokeWidth="1" />
+            <line x1="920" y1="105" x2="1200" y2="105" stroke="rgba(192,57,43,0.2)" strokeWidth="0.8" />
+            <path d="M-10,90 C60,50 120,130 200,80 C280,30 340,110 420,70" stroke="rgba(0,144,255,0.5)" strokeWidth="2" fill="none" />
+            <path d="M-10,110 C80,70 150,140 240,90 C320,45 380,120 460,80" stroke="rgba(0,206,209,0.3)" strokeWidth="1.2" fill="none" />
+            <path d="M780,70 C860,110 920,30 1000,80 C1080,130 1140,50 1210,90" stroke="rgba(192,57,43,0.5)" strokeWidth="2" fill="none" />
+            <path d="M820,90 C900,130 960,50 1040,100 C1110,140 1160,60 1210,110" stroke="rgba(192,57,43,0.25)" strokeWidth="1.2" fill="none" />
+            <circle cx="60" cy="35" r="4" fill="none" stroke="rgba(0,206,209,0.6)" strokeWidth="1.5" />
+            <circle cx="60" cy="35" r="1.5" fill="rgba(0,206,209,0.8)" />
+            <circle cx="1140" cy="35" r="4" fill="none" stroke="rgba(192,57,43,0.6)" strokeWidth="1.5" />
+            <circle cx="1140" cy="35" r="1.5" fill="rgba(192,57,43,0.8)" />
+            <rect x="490" y="95" width="8" height="30" rx="2" fill="rgba(0,144,255,0.3)" />
+            <rect x="502" y="80" width="8" height="45" rx="2" fill="rgba(0,144,255,0.45)" />
+            <rect x="514" y="88" width="8" height="37" rx="2" fill="rgba(0,144,255,0.3)" />
+            <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(0,206,209,0.2)" strokeWidth="12" strokeDasharray="28 84" />
+            <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(255,165,0,0.3)" strokeWidth="12" strokeDasharray="22 90" strokeDashoffset="-28" />
+            <path d="M598,8 L602,8 L608,12 L608,22 C608,26 603,29 600,30 C597,29 592,26 592,22 L592,12 Z" fill="none" stroke="rgba(0,206,209,0.4)" strokeWidth="1.2" />
+            <path d="M596,20 L599,23 L605,16" stroke="rgba(0,206,209,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+          </svg>
+          <div style={{ position: 'absolute', left: '22%', top: '50%', transform: 'translate(-50%,-50%)', width: 320, height: 160, background: 'radial-gradient(ellipse, rgba(0,144,255,0.22) 0%, transparent 65%)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', right: '22%', top: '50%', transform: 'translate(50%,-50%)', width: 280, height: 140, background: 'radial-gradient(ellipse, rgba(192,57,43,0.18) 0%, transparent 65%)', pointerEvents: 'none' }} />
+          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+            <img src="/assets/se-logo.png" alt="Saudi Energy" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+          </div>
+          <div style={{ flex: 1, textAlign: 'center', zIndex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Risk Management Dashboard</div>
+            <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Telecom Network Operations Center</div>
+          </div>
+          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+            <img src="/assets/nasco-logo.png" alt="NASCO" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+          </div>
+        </div>
+        {/* ═══════════════════════════════════════════════════════════ */}
+
         <header style={{ background: palette.header, borderBottom: `1px solid ${palette.border}`, position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(16px)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.28)' : '0 12px 34px rgba(31,56,100,.10)' }}>
-          <div style={{ maxWidth: 1460, margin: '0 auto', padding: '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-              <div className="hidden sm:flex" style={{ alignItems: 'center', gap: 7, flex: '0 0 auto' }}>
-                {HEADER_LEFT_LOGOS.map(logo => <div key={logo.alt} style={{ height: 42, width: 72, padding: 5, borderRadius: 12, background: 'rgba(255,255,255,.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(0,0,0,.08)' }}><img src={logo.src} alt={logo.alt} style={{ maxHeight: logo.height, maxWidth: '100%', objectFit: 'contain' }} /></div>)}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <h1 style={{ margin: 0, color: palette.text, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: 19, letterSpacing: '-.02em' }}>TNOC Risk Management Dashboard</h1>
-                <div style={{ color: palette.muted, fontSize: 11, marginTop: 2, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span>{period}</span><span>·</span><span title={fileName}>{fileName}</span>
-                </div>
-              </div>
+          <div style={{ maxWidth: 1460, margin: '0 auto', padding: '6px 20px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', overflowX: 'auto' }}>
+
+            {/* File info — left */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginRight: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: palette.text, whiteSpace: 'nowrap' }}>{fileName}</span>
             </div>
 
-            <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <div style={{ height: 42, width: 72, padding: 5, borderRadius: 12, background: 'rgba(255,255,255,.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(0,0,0,.08)', marginRight: 4 }}>
-                <img src={NASCO_LOGO.src} alt={NASCO_LOGO.alt} style={{ maxHeight: NASCO_LOGO.height, maxWidth: '100%', objectFit: 'contain' }} />
-              </div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 10, padding: '6px 12px', fontSize: 11, fontWeight: 800, color: palette.text }}>
-                <span style={{ color: palette.muted, fontWeight: 700 }}>Current:</span>
-                <span style={{ color: SE.blue }}>{selectedWeek}</span>
-                {prevWeekLabel && prevWeekLabel !== selectedWeek && <><span style={{ color: palette.muted }}>vs</span><span style={{ color: SE.gold }}>{prevWeekLabel}</span></>}
-              </div>
-              <select value={selectedWeek || ''} onChange={e => onWeekChange(e.target.value)} style={selectStyle}>{(weeks?.length > 0 ? weeks : [{ label: selectedWeek || 'Current', colIndex: 0 }]).map(w => <option key={w.label} value={w.label}>{w.label}</option>)}</select>
-              {['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'].map(id => <button key={id} type="button" onClick={() => scrollToSection(id)} style={{ border: `1px solid ${palette.border}`, background: palette.cardSoft, color: palette.text, borderRadius: 999, padding: '7px 10px', fontSize: 10, fontWeight: 850, cursor: 'pointer' }}>{id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : 'Register'}</button>)}
-              <button onClick={toggleAllSections} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 999, padding: '8px 12px', color: palette.text, fontWeight: 850, fontSize: 11, cursor: 'pointer' }}>
-                {allSectionsExpanded ? <EyeOff size={13} /> : <Eye size={13} />}
-                {allSectionsExpanded ? 'Collapse All' : 'Expand All'}
-              </button>
-              <button onClick={handlePrint} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: SE.navy, border: 'none', borderRadius: 999, padding: '8px 12px', color: 'white', fontWeight: 850, fontSize: 11, cursor: 'pointer' }}><Printer size={13} />PDF</button>
-              <button onClick={() => exportElementAsPNG(dashboardRef, 'TNOC_Full_Dashboard.png', bgForExport)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `linear-gradient(135deg, ${SE.blue}, ${SE.teal})`, border: 'none', borderRadius: 999, padding: '8px 12px', color: 'white', fontWeight: 850, fontSize: 11, cursor: 'pointer' }}><ImageDown size={13} />PNG</button>
-              <ThemeToggle />
-              <button onClick={onReset} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: SE.red, border: 'none', borderRadius: 999, padding: '8px 12px', color: 'white', fontWeight: 850, fontSize: 11, cursor: 'pointer' }}><Home size={13} />Home</button>
-              <button onClick={onReset} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 999, padding: '8px 12px', color: palette.text, fontWeight: 850, fontSize: 11, cursor: 'pointer' }}><Upload size={13} />New File</button>
+            {/* Divider */}
+            <div style={{ width: 1, height: 20, background: palette.border, flexShrink: 0 }} />
+
+            {/* Week badge */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', fontSize: 11, fontWeight: 800, color: isDark ? '#e0f2fe' : '#0f172a', flexShrink: 0, whiteSpace: 'nowrap', backdropFilter: 'blur(8px)' }}>
+              <span style={{ color: isDark ? 'rgba(125,211,252,0.7)' : 'rgba(37,99,235,0.6)', fontWeight: 600, fontSize: 10 }}>Week:</span>
+              <span style={{ color: isDark ? '#38bdf8' : '#2563eb' }}>{selectedWeek}</span>
+              {prevWeekLabel && prevWeekLabel !== selectedWeek && <><span style={{ color: isDark ? 'rgba(125,211,252,0.5)' : 'rgba(37,99,235,0.4)', fontSize: 10 }}>vs</span><span style={{ color: isDark ? '#fbbf24' : '#d97706' }}>{prevWeekLabel}</span></>}
             </div>
+
+            {/* Week dropdown */}
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <select
+                value={selectedWeek || ''}
+                onChange={e => onWeekChange(e.target.value)}
+                style={{
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)',
+                  border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)',
+                  borderRadius: 999,
+                  padding: '5px 28px 5px 12px',
+                  color: isDark ? '#e0f2fe' : '#0f172a',
+                  fontSize: 11,
+                  fontFamily: 'DM Sans, Inter, sans-serif',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  outline: 'none',
+                  height: 30,
+                  backdropFilter: 'blur(8px)',
+                  transition: 'border-color 180ms ease, background 180ms ease',
+                }}
+              >
+                {(weeks?.length > 0 ? weeks : [{ label: selectedWeek || 'Current', colIndex: 0 }]).map(w => <option key={w.label} value={w.label} style={{ background: isDark ? '#0f2040' : '#ffffff', color: isDark ? '#e0f2fe' : '#0f172a' }}>{w.label}</option>)}
+              </select>
+              <svg style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#7dd3fc' : '#2563eb'} strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+            </div>
+
+            {/* Divider */}
+            <div style={{ width: 1, height: 20, background: palette.border, flexShrink: 0 }} />
+
+            {/* Nav scroll buttons */}
+            {['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'].map(id => (
+              <button key={id} type="button" onClick={() => scrollToSection(id)}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', color: isDark ? '#e0f2fe' : '#0f172a', borderRadius: 999, padding: '5px 12px', fontSize: 10, fontWeight: 800, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', height: 30, fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+                {id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : 'Register'}
+              </button>
+            ))}
+
+            {/* Divider */}
+            <div style={{ width: 1, height: 20, background: palette.border, flexShrink: 0 }} />
+
+            {/* Action buttons */}
+            {/* Ghost: Expand/Collapse */}
+            <button onClick={toggleAllSections}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+              {allSectionsExpanded ? <EyeOff size={12} /> : <Eye size={12} />}
+              {allSectionsExpanded ? 'Collapse' : 'Expand'}
+            </button>
+
+            {/* Primary: PDF */}
+            <button onClick={handlePrint}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', border: 'none', borderRadius: 999, padding: '5px 14px', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', boxShadow: '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)', transition: 'transform 180ms ease, box-shadow 180ms ease' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 10px 26px rgba(37,99,235,0.40), inset 0 1px rgba(255,255,255,0.3)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)'; }}>
+              <Printer size={12} />PDF
+            </button>
+
+            {/* Primary: PNG */}
+            <button onClick={() => exportElementAsPNG(dashboardRef, 'Risk_Full_Dashboard.png', bgForExport)}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', border: 'none', borderRadius: 999, padding: '5px 14px', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', boxShadow: '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)', transition: 'transform 180ms ease, box-shadow 180ms ease' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 10px 26px rgba(37,99,235,0.40), inset 0 1px rgba(255,255,255,0.3)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)'; }}>
+              <ImageDown size={12} />PNG
+            </button>
+
+            {/* Segmented pill theme toggle */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: 2, gap: 0, flexShrink: 0, backdropFilter: 'blur(8px)', height: 30 }}>
+              <button
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', transition: 'background 180ms ease, color 180ms ease, box-shadow 180ms ease', height: 24, background: !isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: !isDark ? 'white' : 'rgba(125,211,252,0.6)', boxShadow: !isDark ? '0 4px 12px rgba(37,99,235,0.30)' : 'none' }}
+                onClick={() => { if (isDark) toggleTheme?.(); }}>
+                <Sun size={11} />Light
+              </button>
+              <button
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', transition: 'background 180ms ease, color 180ms ease, box-shadow 180ms ease', height: 24, background: isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: isDark ? 'white' : 'rgba(37,99,235,0.5)', boxShadow: isDark ? '0 4px 12px rgba(37,99,235,0.30)' : 'none' }}
+                onClick={() => { if (!isDark) toggleTheme?.(); }}>
+                <Moon size={11} />Dark
+              </button>
+            </div>
+
+            {/* Ghost: Home */}
+            <button onClick={onReset}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+              <Home size={12} />Home
+            </button>
+
+            {/* Ghost: New File */}
+            <button onClick={onReset}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+              <Upload size={12} />New File
+            </button>
+
           </div>
         </header>
 
         <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundAttachment: 'fixed' }}>
         <main style={{ maxWidth: 1460, margin: '0 auto', padding: '12px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'TNOC_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
+
+
+
+          <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
             <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 9 }}>
               <KpiTile label="Total Risks" value={normalizedKpis.totalRisks} color={SE.navy} selectedWeek={selectedWeek} index={0} palette={palette} />
               <KpiTile label="Total Mitigation" value={normalizedKpis.totalMitigation} color={SE.blue} selectedWeek={selectedWeek} index={1} palette={palette} />
@@ -765,7 +935,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          <SectionCard id="summary-section" title="Professional Risk Movement Summary" palette={palette} bodyRef={summaryRef} compact open={sectionOpen['summary-section']} onOpenChange={open => setSingleSectionOpen('summary-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(summaryRef, 'TNOC_Risk_Movement_Summary.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          <SectionCard id="summary-section" title="Professional Risk Movement Summary" palette={palette} bodyRef={summaryRef} compact open={sectionOpen['summary-section']} onOpenChange={open => setSingleSectionOpen('summary-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(summaryRef, 'Risk_Movement_Summary.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 9 }}>
               {[
                 { label: 'Improved vs Previous Week', value: changesSummary.improved, sub: `${changesSummary.total} filtered risks`, color: SE.green, icon: <TrendingUp size={16} /> },
@@ -786,19 +956,20 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          <SectionCard id="charts-section" title="Professional Risk Analytics Charts" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'TNOC_Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          <SectionCard id="charts-section" title="Professional Risk Analytics Charts" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div className="professional-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>1. Risk Category Donut</h3>
                 <div style={{ position: 'relative', height: 210 }}>
                   <ResponsiveContainer width="100%" height={210}>
                     <PieChart>
-                      <Pie data={donutData} cx="50%" cy="50%" innerRadius={58} outerRadius={88} paddingAngle={2} dataKey="value" animationDuration={650} labelLine={false} label={({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) => {
-                        if (!value) return null;
+                      <Pie data={donutData} cx="50%" cy="50%" innerRadius={58} outerRadius={88} paddingAngle={2} dataKey="value" animationDuration={650} labelLine={false} minAngle={8} label={({ cx, cy, midAngle, innerRadius, outerRadius, value, displayValue }: any) => {
+                        // Hide label for 0-value placeholder slices (value === 0.3)
+                        if (!value || value <= 0.3) return null;
                         const r = innerRadius + (outerRadius - innerRadius) * 0.55;
                         const x = cx + r * Math.cos(-midAngle * Math.PI / 180);
                         const y = cy + r * Math.sin(-midAngle * Math.PI / 180);
-                        return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 13, fontWeight: 950, fill: 'white' }}>{value}</text>;
+                        return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 13, fontWeight: 950, fill: 'white' }}>{displayValue ?? value}</text>;
                       }}>
                         {donutData.map((d, i) => <Cell key={i} fill={d.color} stroke={palette.cardSolid} strokeWidth={2} />)}
                       </Pie>
@@ -939,7 +1110,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          <SectionCard id="risk-register-section" title={`Risk Register — ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} open={sectionOpen['risk-register-section']} onOpenChange={open => setSingleSectionOpen('risk-register-section', open)} actions={<><SmallActionButton palette={palette} onClick={exportRisksToExcel}><FileSpreadsheet size={12} />Excel</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'TNOC_Risk_Register.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
+          <SectionCard id="risk-register-section" title={`Risk Register — ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} open={sectionOpen['risk-register-section']} onOpenChange={open => setSingleSectionOpen('risk-register-section', open)} actions={<><SmallActionButton palette={palette} onClick={exportRisksToExcel}><FileSpreadsheet size={12} />Excel</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'Risk_Register.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
             <div className="no-print" style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 900 }}><Filter size={13} />Filters</span>
               <div style={{ position: 'relative' }}><Search size={13} style={{ position: 'absolute', left: 12, top: 10, color: palette.muted }} /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search title, mitigation, owner…" style={inputStyle} /></div>
@@ -990,7 +1161,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          {activeRisk && <SectionCard id="selected-risk-section" title={`Selected Risk Detail — ${activeRisk.title}`} palette={palette} bodyRef={selectedRef} open={sectionOpen['selected-risk-section']} onOpenChange={open => setSingleSectionOpen('selected-risk-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'TNOC_Selected_Risk_Detail.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          {activeRisk && <SectionCard id="selected-risk-section" title={`Selected Risk Detail — ${activeRisk.title}`} palette={palette} bodyRef={selectedRef} open={sectionOpen['selected-risk-section']} onOpenChange={open => setSingleSectionOpen('selected-risk-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'Risk_Selected_Detail.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 14, alignItems: 'start' }}>
               <div style={chartBox(palette)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><ScoreBadge score={activeRisk.score} /><span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 950, fontSize: 12 }}>{activeRisk.rating}</span><span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span></div>
@@ -1029,7 +1200,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>}
 
-          <footer style={{ textAlign: 'center', fontSize: 10, color: palette.muted, padding: '3px 0 10px' }}>TNOC Risk Management Dashboard · {period} · Click any risk row to update selected risk detail</footer>
+          <footer style={{ textAlign: 'center', fontSize: 10, color: palette.muted, padding: '3px 0 10px' }}>Risk Management Dashboard · {period} · Click any risk row to update selected risk detail</footer>
         </main>
         </div>
       </div>

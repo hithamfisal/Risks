@@ -1,5 +1,5 @@
 /*
- * TNOC Risk Management Dashboard
+ * Risk Management Dashboard
  * Design: Modern Enterprise SaaS / Clean Authority
  * Navy header (#1F3864) + white cards + risk zone colours as data encoding only
  * Typography: DM Sans (headings/KPIs) + Inter (body/table)
@@ -175,7 +175,7 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Professional TNOC dashboard refinements
+   Professional dashboard refinements
    Keeps the UI compact at 100% browser zoom and makes dark/light surfaces
    more consistent for native controls, sticky tables and export captures.
    ────────────────────────────────────────────────────────────────────────── */

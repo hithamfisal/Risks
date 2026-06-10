@@ -4,10 +4,9 @@
  */
 
 import { useState, useRef, DragEvent } from 'react';
-import { Upload, FileSpreadsheet, ArrowRight, AlertCircle, Clock3, Trash2 } from 'lucide-react';
+import { Upload, FileSpreadsheet, ArrowRight, AlertCircle, Clock3, Trash2, Sun, Moon } from 'lucide-react';
 import { parseExcel, getSampleData, DashboardData } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
-import ThemeToggle from '@/components/ThemeToggle';
 
 interface PreviousUploadInfo {
   fileName: string;
@@ -22,18 +21,15 @@ interface UploadPageProps {
   onClearPrevious?: () => void;
 }
 
-const HEADER_LEFT_LOGOS = [
-  { src: '/assets/map-logo.png', alt: 'TNOC', height: 46 },
-  { src: '/assets/se-logo.png', alt: 'Saudi Energy', height: 52 },
-];
-const NASCO_LOGO = { src: '/assets/nasco-logo.png', alt: 'NASCO', height: 58 };
+const SE_LOGO_URL = '/assets/se-logo.png';
+const NASCO_LOGO_URL = '/assets/nasco-logo.png';
 
 export default function UploadPage({ onDataLoaded, previousUpload, onLoadPrevious, onClearPrevious }: UploadPageProps) {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
 
   async function handleFile(file: File) {
@@ -88,33 +84,60 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
       className="min-h-screen flex flex-col"
       style={{ backgroundColor: isDark ? '#061630' : '#F8FBFF' }}
     >
-      {/* Header */}
-      <header style={{ background: isDark ? 'rgba(5, 18, 43, 0.92)' : 'rgba(255, 255, 255, 0.94)', backdropFilter: 'blur(16px)', borderBottom: isDark ? '1px solid rgba(125, 211, 252, 0.22)' : '1px solid rgba(31,56,100,0.12)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.22)' : '0 12px 34px rgba(31,56,100,.10)' }}>
-        <div className="container py-3 flex items-center justify-between gap-4">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
-            <div className="hidden sm:flex" style={{ alignItems: 'center', gap: 10 }}>
-              {HEADER_LEFT_LOGOS.map(logo => (
-                <div key={logo.alt} style={{ height: 58, minWidth: 76, padding: '6px 10px', borderRadius: 14, background: 'rgba(255,255,255,0.96)', boxShadow: '0 10px 30px rgba(0,0,0,0.10)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <img src={logo.src} alt={logo.alt} style={{ maxHeight: logo.height, maxWidth: 112, objectFit: 'contain', display: 'block' }} />
-                </div>
-              ))}
-            </div>
-            <div>
-              <h1 className="font-bold text-xl" style={{ color: isDark ? 'white' : '#1F3864', fontFamily: 'DM Sans, sans-serif' }}>
-                TNOC Risk Management Dashboard
-              </h1>
-              <p className="text-xs mt-0.5" style={{ color: isDark ? '#A7D8FF' : '#38628F' }}>Operations Risk Register — Upload Portal</p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ height: 64, width: 82, padding: '6px 10px', borderRadius: 14, background: 'rgba(255,255,255,0.96)', boxShadow: '0 10px 30px rgba(0,0,0,0.10)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
-              <img src={NASCO_LOGO.src} alt={NASCO_LOGO.alt} style={{ maxHeight: NASCO_LOGO.height, maxWidth: 112, objectFit: 'contain', display: 'block' }} />
-            </div>
-            <ThemeToggle />
-          </div>
+      {/* Banner — same as Dashboard */}
+      <div style={{ width: '100%', background: 'linear-gradient(135deg, #020f2e 0%, #041a4a 40%, #0a1f5c 60%, #0d0a1e 100%)', position: 'relative', overflow: 'hidden', minHeight: 140, display: 'flex', alignItems: 'center', padding: '0 32px', gap: 24 }}>
+        <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 1200 140" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+          {Array.from({length: 18}).map((_,col) => Array.from({length: 5}).map((_,row) => (<circle key={`d-${col}-${row}`} cx={col*70+35} cy={row*30+15} r="1.2" fill="rgba(30,144,255,0.25)" />)))}
+          <line x1="0" y1="35" x2="340" y2="35" stroke="rgba(0,206,209,0.35)" strokeWidth="1" />
+          <line x1="0" y1="105" x2="280" y2="105" stroke="rgba(0,206,209,0.2)" strokeWidth="0.8" />
+          <line x1="860" y1="35" x2="1200" y2="35" stroke="rgba(192,57,43,0.3)" strokeWidth="1" />
+          <line x1="920" y1="105" x2="1200" y2="105" stroke="rgba(192,57,43,0.2)" strokeWidth="0.8" />
+          <path d="M-10,90 C60,50 120,130 200,80 C280,30 340,110 420,70" stroke="rgba(0,144,255,0.5)" strokeWidth="2" fill="none" />
+          <path d="M-10,110 C80,70 150,140 240,90 C320,45 380,120 460,80" stroke="rgba(0,206,209,0.3)" strokeWidth="1.2" fill="none" />
+          <path d="M780,70 C860,110 920,30 1000,80 C1080,130 1140,50 1210,90" stroke="rgba(192,57,43,0.5)" strokeWidth="2" fill="none" />
+          <path d="M820,90 C900,130 960,50 1040,100 C1110,140 1160,60 1210,110" stroke="rgba(192,57,43,0.25)" strokeWidth="1.2" fill="none" />
+          <circle cx="60" cy="35" r="4" fill="none" stroke="rgba(0,206,209,0.6)" strokeWidth="1.5" />
+          <circle cx="60" cy="35" r="1.5" fill="rgba(0,206,209,0.8)" />
+          <circle cx="1140" cy="35" r="4" fill="none" stroke="rgba(192,57,43,0.6)" strokeWidth="1.5" />
+          <circle cx="1140" cy="35" r="1.5" fill="rgba(192,57,43,0.8)" />
+          <rect x="490" y="95" width="8" height="30" rx="2" fill="rgba(0,144,255,0.3)" />
+          <rect x="502" y="80" width="8" height="45" rx="2" fill="rgba(0,144,255,0.45)" />
+          <rect x="514" y="88" width="8" height="37" rx="2" fill="rgba(0,144,255,0.3)" />
+          <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(0,206,209,0.2)" strokeWidth="12" strokeDasharray="28 84" />
+          <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(255,165,0,0.3)" strokeWidth="12" strokeDasharray="22 90" strokeDashoffset="-28" />
+          <path d="M598,8 L602,8 L608,12 L608,22 C608,26 603,29 600,30 C597,29 592,26 592,22 L592,12 Z" fill="none" stroke="rgba(0,206,209,0.4)" strokeWidth="1.2" />
+          <path d="M596,20 L599,23 L605,16" stroke="rgba(0,206,209,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+        </svg>
+        <div style={{ position: 'absolute', left: '22%', top: '50%', transform: 'translate(-50%,-50%)', width: 320, height: 160, background: 'radial-gradient(ellipse, rgba(0,144,255,0.22) 0%, transparent 65%)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', right: '22%', top: '50%', transform: 'translate(50%,-50%)', width: 280, height: 140, background: 'radial-gradient(ellipse, rgba(192,57,43,0.18) 0%, transparent 65%)', pointerEvents: 'none' }} />
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+          <img src={SE_LOGO_URL} alt="Saudi Energy" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
         </div>
-      </header>
+        <div style={{ flex: 1, textAlign: 'center', zIndex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Risk Management Dashboard</div>
+          <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Telecom Network Operations Center</div>
+        </div>
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+          <img src={NASCO_LOGO_URL} alt="NASCO" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+        </div>
+      </div>
+
+      {/* Thin control bar below banner */}
+      <div style={{ background: isDark ? 'rgba(5,18,43,0.95)' : 'rgba(255,255,255,0.96)', borderBottom: isDark ? '1px solid rgba(125,211,252,0.18)' : '1px solid rgba(31,56,100,0.10)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '6px 24px', gap: 8 }}>
+        {/* Segmented pill theme toggle */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: 2, gap: 0, backdropFilter: 'blur(8px)', height: 30 }}>
+          <button
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', transition: 'background 180ms ease, color 180ms ease, box-shadow 180ms ease', height: 24, background: !isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: !isDark ? 'white' : 'rgba(125,211,252,0.6)', boxShadow: !isDark ? '0 4px 12px rgba(37,99,235,0.30)' : 'none' }}
+            onClick={() => { if (isDark) toggleTheme?.(); }}>
+            <Sun size={11} />Light
+          </button>
+          <button
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', transition: 'background 180ms ease, color 180ms ease, box-shadow 180ms ease', height: 24, background: isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: isDark ? 'white' : 'rgba(37,99,235,0.5)', boxShadow: isDark ? '0 4px 12px rgba(37,99,235,0.30)' : 'none' }}
+            onClick={() => { if (!isDark) toggleTheme?.(); }}>
+            <Moon size={11} />Dark
+          </button>
+        </div>
+      </div>
 
       {/* Main */}
       <main
@@ -246,19 +269,6 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
             </button>
           </div>
 
-          {/* Info */}
-          <div className="mt-6 grid grid-cols-3 gap-3 text-center">
-            {[
-              { label: 'KPI Tiles', desc: 'Auto-calculated from your data' },
-              { label: 'Live Charts', desc: 'Doughnut, gauge & bar charts' },
-              { label: 'Risk Register', desc: 'Colour-coded score table' },
-            ].map(item => (
-              <div key={item.label} className="dash-card p-3" style={{ background: isDark ? 'rgba(6, 20, 48, 0.76)' : 'rgba(255,255,255,0.82)', border: isDark ? '1px solid rgba(125,211,252,.18)' : '1px solid rgba(31,56,100,.08)', backdropFilter: 'blur(12px)' }}>
-                <p className="font-bold text-xs" style={{ color: isDark ? '#7DD3FC' : '#1F3864', fontFamily: 'DM Sans, sans-serif' }}>{item.label}</p>
-                <p className="text-xs mt-0.5" style={{ color: isDark ? '#94A3B8' : '#9CA3AF' }}>{item.desc}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </main>
     </div>
