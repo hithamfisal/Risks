@@ -141,7 +141,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
 
       {/* Main */}
       <main
-        className="flex-1 flex items-center justify-center py-16 px-4"
+        className="flex-1 flex items-center justify-center py-6 px-4"
         style={{
           backgroundImage: `${isDark ? 'linear-gradient(90deg, rgba(2,6,23,.42), rgba(2,6,23,.12))' : 'linear-gradient(90deg, rgba(255,255,255,.55), rgba(255,255,255,.28))'}, url(${pageBg})`,
           backgroundSize: 'cover',
@@ -151,17 +151,17 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
       >
         <div className="w-full max-w-2xl">
           {/* Card */}
-          <div className="dash-card p-8" style={{ background: isDark ? 'rgba(6, 20, 48, 0.82)' : 'rgba(255,255,255,0.88)', border: isDark ? '1px solid rgba(125,211,252,0.22)' : '1px solid rgba(31,56,100,0.10)', boxShadow: isDark ? '0 26px 80px rgba(0,0,0,.34)' : '0 26px 80px rgba(31,56,100,.14)', backdropFilter: 'blur(18px)' }}>
-            <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-4"
+          <div className="dash-card p-5" style={{ background: isDark ? 'rgba(6, 20, 48, 0.82)' : 'rgba(255,255,255,0.88)', border: isDark ? '1px solid rgba(125,211,252,0.22)' : '1px solid rgba(31,56,100,0.10)', boxShadow: isDark ? '0 26px 80px rgba(0,0,0,.34)' : '0 26px 80px rgba(31,56,100,.14)', backdropFilter: 'blur(18px)' }}>
+            <div className="text-center mb-4">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full mb-3"
                    style={{ background: isDark ? 'rgba(14,165,233,.16)' : '#EBF4FF' }}>
-                <FileSpreadsheet size={32} style={{ color: isDark ? '#38BDF8' : '#1F3864' }} />
+                <FileSpreadsheet size={24} style={{ color: isDark ? '#38BDF8' : '#1F3864' }} />
               </div>
-              <h2 className="text-2xl font-bold" style={{ color: isDark ? '#F8FAFC' : '#1F2937', fontFamily: 'DM Sans, sans-serif' }}>
+              <h2 className="text-xl font-bold" style={{ color: isDark ? '#F8FAFC' : '#1F2937', fontFamily: 'DM Sans, sans-serif' }}>
                 Upload Your Risk Register
               </h2>
-              <p className="text-sm mt-2" style={{ color: isDark ? '#CBD5E1' : '#6B7280' }}>
-                Upload an Excel file (.xlsx / .xlsm) to generate your dashboard automatically.
+              <p className="text-sm mt-1" style={{ color: isDark ? '#CBD5E1' : '#6B7280' }}>
+                Upload an Excel file (.xlsx / .xls / .xlsm) to generate your dashboard automatically.
               </p>
             </div>
 
@@ -213,19 +213,18 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
 
             {/* Drop zone */}
             <div
-              className={`drop-zone flex flex-col items-center justify-center p-10 text-center cursor-pointer transition-all ${dragging ? 'drag-over' : ''}`}
+              className={`drop-zone flex flex-col items-center justify-center p-3 text-center cursor-pointer transition-all ${dragging ? 'drag-over' : ''}`}
               onDrop={onDrop}
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onClick={() => inputRef.current?.click()}
               style={{ background: dragging ? (isDark ? 'rgba(56,189,248,.16)' : '#EBF4FF') : (isDark ? 'rgba(15,23,42,.48)' : 'rgba(255,255,255,.62)'), borderColor: dragging ? '#38BDF8' : (isDark ? 'rgba(125,211,252,.35)' : '#CBD5E0') }}
             >
-              <Upload size={36} className="mb-3" style={{ color: dragging ? '#38BDF8' : (isDark ? '#93C5FD' : '#a0aec0') }} />
-              <p className="font-semibold" style={{ color: isDark ? '#E2E8F0' : '#374151', fontFamily: 'DM Sans, sans-serif' }}>
+              <Upload size={20} className="mb-1" style={{ color: dragging ? '#38BDF8' : (isDark ? '#93C5FD' : '#a0aec0') }} />
+              <p className="font-semibold text-sm" style={{ color: isDark ? '#E2E8F0' : '#374151', fontFamily: 'DM Sans, sans-serif', margin: 0 }}>
                 {dragging ? 'Drop your file here' : 'Drag & drop your Excel file here'}
               </p>
-              <p className="text-sm mt-1" style={{ color: isDark ? '#94A3B8' : '#9CA3AF' }}>or click to browse</p>
-              <p className="text-xs mt-3" style={{ color: isDark ? '#64748B' : '#D1D5DB' }}>Supports .xlsx · .xls · .xlsm</p>
+              <p className="text-xs" style={{ color: isDark ? '#94A3B8' : '#9CA3AF', marginTop: 2 }}>or click to browse · .xlsx · .xls · .xlsm</p>
               <input
                 ref={inputRef}
                 type="file"
@@ -252,7 +251,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
             )}
 
             {/* Divider */}
-            <div className="flex items-center gap-3 my-6">
+            <div className="flex items-center gap-3 my-4">
               <div className="flex-1 h-px" style={{ background: isDark ? 'rgba(148,163,184,.22)' : '#E5E7EB' }} />
               <span className="text-xs" style={{ color: isDark ? '#94A3B8' : '#9CA3AF' }}>or</span>
               <div className="flex-1 h-px" style={{ background: isDark ? 'rgba(148,163,184,.22)' : '#E5E7EB' }} />
