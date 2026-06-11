@@ -87,6 +87,15 @@ export interface DashboardData {
   riskSummary: { name: string; value: number; color: string }[];
   riskRegister: RiskRow[];
   selectedRisk: RiskRow | null;
+  uploadValidation?: {
+    sheetName: string;
+    detectedWeeks: string[];
+    riskCount: number;
+    mitigationCount: number;
+    missingOwners: number;
+    missingScores: number;
+    warnings: string[];
+  };
   mitigationTargetsByWeek?: Record<string, { aboveTarget: number; belowTarget: number }>;
 }
 
@@ -365,6 +374,14 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   };
 
   const selectedRisk = riskRegister.find(r => r.rating === 'Very High') || riskRegister[0] || null;
+  const missingOwners = riskRegister.filter(r => !r.owner).length;
+  const missingScores = riskRegister.filter(r => !r.score).length;
+  const validationWarnings = [
+    weeks.length === 0 ? 'No reporting week columns were detected.' : '',
+    missingOwners > 0 ? `${missingOwners} risk${missingOwners === 1 ? '' : 's'} missing owner.` : '',
+    missingScores > 0 ? `${missingScores} risk${missingScores === 1 ? '' : 's'} missing score.` : '',
+    riskRegister.length === 0 ? 'No risk title rows were detected.' : '',
+  ].filter(Boolean);
 
   return {
     period: selectedWeek,
@@ -384,6 +401,15 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
     riskSummary,
     riskRegister,
     selectedRisk,
+    uploadValidation: {
+      sheetName: 'Approved TNOC Risk',
+      detectedWeeks: weeks.map(w => w.label),
+      riskCount: finalTotalRisks,
+      mitigationCount: totalMitigation,
+      missingOwners,
+      missingScores,
+      warnings: validationWarnings,
+    },
   };
 }
 
@@ -455,6 +481,7 @@ export function switchWeek(data: DashboardData, newWeek: string): DashboardData 
     riskSummary,
     riskRegister,
     selectedRisk,
+    uploadValidation: data.uploadValidation,
   };
 }
 
@@ -644,5 +671,14 @@ export function getSampleData(): DashboardData {
     ],
     riskRegister: sampleRisks,
     selectedRisk: sampleRisks[2],
+    uploadValidation: {
+      sheetName: 'Sample Data',
+      detectedWeeks: weeks.map(w => w.label),
+      riskCount: sampleRisks.length,
+      mitigationCount: 40,
+      missingOwners: 0,
+      missingScores: 0,
+      warnings: [],
+    },
   };
 }

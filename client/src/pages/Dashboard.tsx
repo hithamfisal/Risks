@@ -18,11 +18,11 @@ import * as XLSX from 'xlsx';
 import {
   Upload, Printer, TrendingUp, TrendingDown, Minus, Filter, X, BarChart2,
   ChevronDown, ChevronRight, Home, ImageDown, FileSpreadsheet, Search,
-  RotateCcw, Download, Eye, EyeOff, Moon, Sun,
+  RotateCcw, Eye, EyeOff, Moon, Sun, AlertTriangle, ClipboardCheck,
 } from 'lucide-react';
 import { DashboardData, getScoreColor, getRatingColor, type RiskRow } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
-import ThemeToggle from '@/components/ThemeToggle';
+import { exportElementAsPNG } from '@/lib/dashboardExport';
 
 const HEADER_LEFT_LOGOS = [
   { src: '/assets/map-logo.png', alt: 'Map', height: 34 },
@@ -71,7 +71,18 @@ function makePalette(isDark: boolean) {
     shadow: isDark ? '0 22px 70px rgba(0,0,0,.34)' : '0 18px 55px rgba(31,56,100,.13)',
     chartGrid: isDark ? 'rgba(148,163,184,.18)' : 'rgba(31,56,100,.12)',
     tooltip: isDark ? '#071836' : '#FFFFFF',
-    buttonText: '#FFFFFF',
+    buttonBg: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)',
+    buttonText: isDark ? '#E0F2FE' : '#0F172A',
+    buttonBorder: isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)',
+    buttonHover: isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)',
+    buttonHoverBorder: isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)',
+    accentBg: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)',
+    accentText: '#FFFFFF',
+    dangerBg: isDark ? 'rgba(127,29,29,0.92)' : 'rgba(254,242,242,0.94)',
+    dangerText: isDark ? '#FEE2E2' : '#991B1B',
+    dangerBorder: isDark ? 'rgba(252,165,165,0.32)' : 'rgba(185,28,28,0.20)',
+    disabledBg: isDark ? 'rgba(30,41,59,0.62)' : 'rgba(226,232,240,0.90)',
+    disabledText: isDark ? '#94A3B8' : '#64748B',
   };
 }
 
@@ -171,7 +182,7 @@ function ScoreBadge({ score }: { score: number }) {
 function ChangeIndicator({ dev }: { dev: number }) {
   if (dev > 0) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: SE.green, fontWeight: 800, fontSize: 11 }}><TrendingUp size={12} />+{dev}%</span>;
   if (dev < 0) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: SE.red, fontWeight: 800, fontSize: 11 }}><TrendingDown size={12} />{dev}%</span>;
-  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#95A5A6', fontWeight: 700, fontSize: 11 }}><Minus size={12} />–</span>;
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#95A5A6', fontWeight: 700, fontSize: 11 }}><Minus size={12} />-</span>;
 }
 
 function Sparkline({ weekProgress, weeks }: { weekProgress: Record<string, number>; weeks: { label: string }[] }) {
@@ -206,16 +217,16 @@ function getDateValue(value: string): number | null {
   if (!value) return null;
 
   // 1. Quarter strings: Q1 2026, q2-2025, Q3/2024, etc.
-  //    Q1 → Mar 31 | Q2 → Jun 30 | Q3 → Sep 30 | Q4 → Dec 31
+  //    Q1 -> Mar 31 | Q2 -> Jun 30 | Q3 -> Sep 30 | Q4 -> Dec 31
   const quarterMatch = value.match(/[Qq]([1-4])[\s\-\/]*(\d{4})/);
   if (quarterMatch) {
     const q = Number(quarterMatch[1]);
     const yr = Number(quarterMatch[2]);
     const quarterEnd: [number, number][] = [
-      [2, 31],   // Q1 → March 31
-      [5, 30],   // Q2 → June 30
-      [8, 30],   // Q3 → September 30
-      [11, 31],  // Q4 → December 31
+      [2, 31],   // Q1 -> March 31
+      [5, 30],   // Q2 -> June 30
+      [8, 30],   // Q3 -> September 30
+      [11, 31],  // Q4 -> December 31
     ];
     const [month, day] = quarterEnd[q - 1];
     return new Date(yr, month, day).getTime();
@@ -260,16 +271,6 @@ function normalise(text: string) {
   return (text || '').toLowerCase().trim();
 }
 
-async function exportElementAsPNG(ref: RefObject<HTMLElement | null>, fileName: string, backgroundColor: string) {
-  if (!ref.current) return;
-  const html2canvas = (await import('html2canvas')).default;
-  const canvas = await html2canvas(ref.current, { backgroundColor, scale: 2, useCORS: true });
-  const link = document.createElement('a');
-  link.download = fileName;
-  link.href = canvas.toDataURL('image/png');
-  link.click();
-}
-
 interface SectionCardProps {
   id: string;
   title: string;
@@ -310,11 +311,138 @@ function SectionCard({ id, title, palette, defaultOpen = false, open: controlled
   );
 }
 
-function SmallActionButton({ children, onClick, title, palette, disabled = false }: { children: ReactNode; onClick?: () => void; title?: string; palette: ThemePalette; disabled?: boolean }) {
+type ButtonTone = 'normal' | 'accent' | 'danger';
+type FileIconType = 'png' | 'excel' | 'pdf' | 'ppt';
+
+function FileTypeIcon({ type }: { type: FileIconType }) {
+  const config = {
+    png: { label: 'PNG', color: '#0EA5E9', icon: <ImageDown size={11} /> },
+    excel: { label: 'XLS', color: '#14804A', icon: <FileSpreadsheet size={11} /> },
+    pdf: { label: 'PDF', color: '#C0392B', icon: <Printer size={11} /> },
+    ppt: { label: 'PPT', color: '#D97706', icon: <BarChart2 size={11} /> },
+  }[type];
+
   return (
-    <button type="button" onClick={onClick} title={title} disabled={disabled} className="no-print" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, borderRadius: 999, border: '1px solid rgba(255,255,255,.22)', background: disabled ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.16)', color: palette.buttonText, padding: '0 10px', fontSize: 10, fontWeight: 800, fontFamily: 'DM Sans, sans-serif', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.55 : 1 }}>
+    <span
+      aria-hidden="true"
+      style={{
+        width: 21,
+        height: 24,
+        borderRadius: 4,
+        background: '#FFFFFF',
+        border: `1px solid ${config.color}`,
+        color: config.color,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        flex: '0 0 auto',
+        boxShadow: '0 2px 6px rgba(0,0,0,.12)',
+      }}
+    >
+      {config.icon}
+      <span style={{ position: 'absolute', left: 2, right: 2, bottom: 1, fontSize: 5.5, lineHeight: 1, fontWeight: 950, textAlign: 'center', fontFamily: 'DM Sans, sans-serif' }}>
+        {config.label}
+      </span>
+    </span>
+  );
+}
+
+function actionButtonStyle(palette: ThemePalette, tone: ButtonTone = 'normal', disabled = false): CSSProperties {
+  if (disabled) {
+    return {
+      background: palette.disabledBg,
+      color: palette.disabledText,
+      border: `1px solid ${palette.buttonBorder}`,
+      cursor: 'not-allowed',
+      opacity: 0.78,
+    };
+  }
+
+  if (tone === 'accent') {
+    return {
+      background: palette.accentBg,
+      color: palette.accentText,
+      border: '1px solid rgba(56,189,248,.45)',
+      boxShadow: '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)',
+      cursor: 'pointer',
+    };
+  }
+
+  if (tone === 'danger') {
+    return {
+      background: palette.dangerBg,
+      color: palette.dangerText,
+      border: `1px solid ${palette.dangerBorder}`,
+      cursor: 'pointer',
+    };
+  }
+
+  return {
+    background: palette.buttonBg,
+    color: palette.buttonText,
+    border: `1px solid ${palette.buttonBorder}`,
+    cursor: 'pointer',
+  };
+}
+
+function DashboardButton({
+  children,
+  onClick,
+  title,
+  palette,
+  disabled = false,
+  tone = 'normal',
+  fileType,
+  compact = false,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  title?: string;
+  palette: ThemePalette;
+  disabled?: boolean;
+  tone?: ButtonTone;
+  fileType?: FileIconType;
+  compact?: boolean;
+}) {
+  const base = actionButtonStyle(palette, tone, disabled);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className="dashboard-action-button no-print"
+      style={{
+        ...base,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: fileType ? 6 : 5,
+        minHeight: compact ? 28 : 30,
+        borderRadius: 999,
+        padding: fileType ? (compact ? '3px 9px 3px 6px' : '3px 12px 3px 7px') : (compact ? '6px 10px' : '5px 12px'),
+        fontSize: compact ? 10 : 10,
+        fontWeight: 850,
+        fontFamily: 'DM Sans, Inter, sans-serif',
+        whiteSpace: 'nowrap',
+        width: 'fit-content',
+        flexShrink: 0,
+        lineHeight: 1,
+        backdropFilter: tone === 'accent' ? undefined : 'blur(8px)',
+      }}
+    >
+      {fileType && <FileTypeIcon type={fileType} />}
       {children}
     </button>
+  );
+}
+
+function SmallActionButton({ children, onClick, title, palette, disabled = false, tone = 'normal', fileType }: { children: ReactNode; onClick?: () => void; title?: string; palette: ThemePalette; disabled?: boolean; tone?: ButtonTone; fileType?: FileIconType }) {
+  return (
+    <DashboardButton onClick={onClick} title={title} palette={palette} disabled={disabled} tone={tone} fileType={fileType} compact>
+      {children}
+    </DashboardButton>
   );
 }
 
@@ -415,7 +543,7 @@ function TrendModal({ data, weeks, onClose, palette }: { data: DashboardData; we
     <div className="no-print" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.62)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: palette.cardSolid, border: `1px solid ${palette.border}`, borderRadius: 18, boxShadow: '0 30px 90px rgba(0,0,0,.35)', width: '100%', maxWidth: 1160, maxHeight: '86vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
         <div style={{ background: palette.sectionHeader, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ color: 'white', fontFamily: 'DM Sans, sans-serif', fontWeight: 900, fontSize: 14 }}>Week-over-Week Trend Comparison — All Risks</span>
+          <span style={{ color: 'white', fontFamily: 'DM Sans, sans-serif', fontWeight: 900, fontSize: 14 }}>Week-over-Week Trend Comparison - All Risks</span>
           <button onClick={onClose} style={{ background: 'rgba(255,255,255,.14)', border: '1px solid rgba(255,255,255,.22)', color: 'white', cursor: 'pointer', borderRadius: 999, width: 32, height: 32, display: 'grid', placeItems: 'center' }}><X size={17} /></button>
         </div>
         <div style={{ overflow: 'auto', flex: 1 }}>
@@ -439,7 +567,7 @@ function TrendModal({ data, weeks, onClose, palette }: { data: DashboardData; we
                     {weekVals.map((val, wi) => {
                       const prev = wi > 0 ? weekVals[wi - 1] : val;
                       const color = val >= 100 ? SE.green : val > prev ? SE.blue : val < prev ? SE.red : palette.muted;
-                      return <td key={wi} style={{ ...modalTd, color, textAlign: 'center', fontWeight: 900 }}>{val > 0 ? `${val}%` : '–'}</td>;
+                      return <td key={wi} style={{ ...modalTd, color, textAlign: 'center', fontWeight: 900 }}>{val > 0 ? `${val}%` : '-'}</td>;
                     })}
                     <td style={{ ...modalTd, textAlign: 'center' }}><ChangeIndicator dev={overallChange} /></td>
                   </tr>
@@ -503,6 +631,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const palette = useMemo(() => makePalette(isDark), [isDark]);
   const themeBg = isDark ? '/assets/dark.png' : '/assets/light.png';
   const bgForExport = isDark ? '#061630' : '#F8FBFF';
+  const validation = data.uploadValidation;
 
   useEffect(() => setActiveRisk(data.selectedRisk), [data.selectedRisk, data.selectedWeek]);
 
@@ -573,6 +702,21 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     return { week: w.label, avgProgress, completed, improved, declined };
   }), [riskRegister, weeks]);
 
+  // Multi-week expected target vs actual trend.
+  // Expected target = average of all risks' target (100%) weighted by how many are expected complete per week.
+  // Since no per-week target column exists in the Excel, we use a linear ramp:
+  // target for week N = round( (N / totalWeeks) * 100 ) - equal progress expected each week.
+  const weeklyTargetVsActualData = useMemo(() => {
+    const total = weeks.length || 1;
+    return weeks.map((w, index) => {
+      const values = riskRegister.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
+      const avgActual = values.length ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
+      const avgTarget = Math.round(((index + 1) / total) * 100);
+      const dev = avgActual - avgTarget;
+      return { week: w.label, avgActual, avgTarget, dev };
+    });
+  }, [riskRegister, weeks]);
+
   const ownerHighRiskData = useMemo(() => {
     const map: Record<string, { count: number; totalPct: number; highCount: number }> = {};
     riskRegister.forEach(r => {
@@ -584,7 +728,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     });
     return Object.entries(map)
       .map(([owner, d]) => ({
-        owner: owner.length > 22 ? `${owner.slice(0, 22)}…` : owner,
+        owner: owner.length > 22 ? `${owner.slice(0, 22)}...` : owner,
         fullOwner: owner,
         count: d.count,
         avgPct: Math.round(d.totalPct / d.count),
@@ -603,9 +747,34 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
         return acc;
       }, {});
     return Object.entries(counts)
-      .map(([owner, overdue]) => ({ owner: owner.length > 22 ? `${owner.slice(0, 22)}…` : owner, fullOwner: owner, overdue }))
+      .map(([owner, overdue]) => ({ owner: owner.length > 22 ? `${owner.slice(0, 22)}...` : owner, fullOwner: owner, overdue }))
       .sort((a, b) => b.overdue - a.overdue)
       .slice(0, 10);
+  }, [riskRegister]);
+
+  const overdueRisks = useMemo(() => {
+    const now = Date.now();
+    return riskRegister
+      .filter(r => (r.currentPct || 0) < 100 && getDateValue(r.closingDate) !== null && Number(getDateValue(r.closingDate)) < now)
+      .sort((a, b) => (getDateValue(a.closingDate) ?? 0) - (getDateValue(b.closingDate) ?? 0))
+      .slice(0, 8);
+  }, [riskRegister]);
+
+  const ownerAccountabilityData = useMemo(() => {
+    const now = Date.now();
+    const ownerMap = riskRegister.reduce<Record<string, { owner: string; total: number; high: number; overdue: number; completed: number; totalPct: number }>>((acc, risk) => {
+      const owner = risk.owner || 'Unassigned';
+      if (!acc[owner]) acc[owner] = { owner, total: 0, high: 0, overdue: 0, completed: 0, totalPct: 0 };
+      acc[owner].total += 1;
+      acc[owner].totalPct += risk.currentPct;
+      if (risk.score >= 15 || /high/i.test(risk.rating)) acc[owner].high += 1;
+      if (risk.currentPct >= 100) acc[owner].completed += 1;
+      if ((risk.currentPct || 0) < 100 && getDateValue(risk.closingDate) !== null && Number(getDateValue(risk.closingDate)) < now) acc[owner].overdue += 1;
+      return acc;
+    }, {});
+    return Object.values(ownerMap)
+      .map(owner => ({ ...owner, avgPct: owner.total ? Math.round(owner.totalPct / owner.total) : 0 }))
+      .sort((a, b) => b.high - a.high || b.overdue - a.overdue || b.total - a.total);
   }, [riskRegister]);
 
   const progressData = useMemo(() => {
@@ -620,7 +789,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   }, [riskRegister, progressCounts]);
 
   const detailData = useMemo(() => riskRegister.map(r => ({
-    name: r.title.length > 34 ? `${r.title.slice(0, 34)}…` : r.title,
+    name: r.title.length > 34 ? `${r.title.slice(0, 34)}...` : r.title,
     fullName: r.title,
     current: r.currentPct,
     before: r.beforePct,
@@ -669,8 +838,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     }, 100);
   }, []);
 
-  const exportRisksToExcel = useCallback(() => {
-    const rows = filteredRisks.map(r => ({
+  const exportRiskRowsToExcel = useCallback((rowsToExport: RiskRow[], scope: 'Filtered' | 'All') => {
+    const rows = rowsToExport.map(r => ({
       'Risk Title': r.title,
       Mitigation: r.mitigation,
       'Risk Owner': r.owner,
@@ -687,8 +856,16 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Risk Register');
-    XLSX.writeFile(wb, `Risk_Register_${selectedWeek || period}.xlsx`);
-  }, [filteredRisks, selectedWeek, period]);
+    XLSX.writeFile(wb, `Risk_Register_${scope}_${selectedWeek || period}.xlsx`);
+  }, [selectedWeek, period]);
+
+  const exportFilteredRisksToExcel = useCallback(() => {
+    exportRiskRowsToExcel(filteredRisks, 'Filtered');
+  }, [exportRiskRowsToExcel, filteredRisks]);
+
+  const exportAllRisksToExcel = useCallback(() => {
+    exportRiskRowsToExcel(riskRegister, 'All');
+  }, [exportRiskRowsToExcel, riskRegister]);
 
   const visibleSectionIds = useMemo(() => {
     const ids = ['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'];
@@ -759,49 +936,27 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
       <div ref={dashboardRef} className="dashboard-shell" style={{ minHeight: '100vh', backgroundColor: palette.page, fontFamily: 'Inter, sans-serif', color: palette.text }}>
 
-        {/* ═══════════════ BANNER (above sticky header) ═══════════════ */}
-        <div style={{ width: '100%', background: 'linear-gradient(135deg, #020f2e 0%, #041a4a 40%, #0a1f5c 60%, #0d0a1e 100%)', position: 'relative', overflow: 'hidden', minHeight: 140, display: 'flex', alignItems: 'center', padding: '0 32px', gap: 24 }}>
-          <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 1200 140" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-            {Array.from({length: 18}).map((_,col) => Array.from({length: 5}).map((_,row) => (<circle key={`d-${col}-${row}`} cx={col*70+35} cy={row*30+15} r="1.2" fill="rgba(30,144,255,0.25)" />)))}
-            <line x1="0" y1="35" x2="340" y2="35" stroke="rgba(0,206,209,0.35)" strokeWidth="1" />
-            <line x1="0" y1="105" x2="280" y2="105" stroke="rgba(0,206,209,0.2)" strokeWidth="0.8" />
-            <line x1="860" y1="35" x2="1200" y2="35" stroke="rgba(192,57,43,0.3)" strokeWidth="1" />
-            <line x1="920" y1="105" x2="1200" y2="105" stroke="rgba(192,57,43,0.2)" strokeWidth="0.8" />
-            <path d="M-10,90 C60,50 120,130 200,80 C280,30 340,110 420,70" stroke="rgba(0,144,255,0.5)" strokeWidth="2" fill="none" />
-            <path d="M-10,110 C80,70 150,140 240,90 C320,45 380,120 460,80" stroke="rgba(0,206,209,0.3)" strokeWidth="1.2" fill="none" />
-            <path d="M780,70 C860,110 920,30 1000,80 C1080,130 1140,50 1210,90" stroke="rgba(192,57,43,0.5)" strokeWidth="2" fill="none" />
-            <path d="M820,90 C900,130 960,50 1040,100 C1110,140 1160,60 1210,110" stroke="rgba(192,57,43,0.25)" strokeWidth="1.2" fill="none" />
-            <circle cx="60" cy="35" r="4" fill="none" stroke="rgba(0,206,209,0.6)" strokeWidth="1.5" />
-            <circle cx="60" cy="35" r="1.5" fill="rgba(0,206,209,0.8)" />
-            <circle cx="1140" cy="35" r="4" fill="none" stroke="rgba(192,57,43,0.6)" strokeWidth="1.5" />
-            <circle cx="1140" cy="35" r="1.5" fill="rgba(192,57,43,0.8)" />
-            <rect x="490" y="95" width="8" height="30" rx="2" fill="rgba(0,144,255,0.3)" />
-            <rect x="502" y="80" width="8" height="45" rx="2" fill="rgba(0,144,255,0.45)" />
-            <rect x="514" y="88" width="8" height="37" rx="2" fill="rgba(0,144,255,0.3)" />
-            <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(0,206,209,0.2)" strokeWidth="12" strokeDasharray="28 84" />
-            <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(255,165,0,0.3)" strokeWidth="12" strokeDasharray="22 90" strokeDashoffset="-28" />
-            <path d="M598,8 L602,8 L608,12 L608,22 C608,26 603,29 600,30 C597,29 592,26 592,22 L592,12 Z" fill="none" stroke="rgba(0,206,209,0.4)" strokeWidth="1.2" />
-            <path d="M596,20 L599,23 L605,16" stroke="rgba(0,206,209,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round" />
-          </svg>
-          <div style={{ position: 'absolute', left: '22%', top: '50%', transform: 'translate(-50%,-50%)', width: 320, height: 160, background: 'radial-gradient(ellipse, rgba(0,144,255,0.22) 0%, transparent 65%)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', right: '22%', top: '50%', transform: 'translate(50%,-50%)', width: 280, height: 140, background: 'radial-gradient(ellipse, rgba(192,57,43,0.18) 0%, transparent 65%)', pointerEvents: 'none' }} />
-          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
-            <img src="/assets/se-logo.png" alt="Saudi Energy" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+        <div className="unified-dashboard-banner" style={{ background: palette.header, borderBottom: `1px solid ${palette.border}`, boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.28)' : '0 12px 34px rgba(31,56,100,.10)' }}>
+          <div className="unified-logo-card unified-logo-card-main">
+            <img src={NASCO_LOGO.src} alt={NASCO_LOGO.alt} style={{ maxHeight: NASCO_LOGO.height, maxWidth: '100%', objectFit: 'contain' }} />
           </div>
-          <div style={{ flex: 1, textAlign: 'center', zIndex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Risk Management Dashboard</div>
-            <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Telecom Network Operations Center</div>
+          <div className="unified-title-block">
+            <h1>RISK MANAGEMENT DASHBOARD</h1>
+            <p>Telecom Network Operations Center</p>
           </div>
-          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
-            <img src="/assets/nasco-logo.png" alt="NASCO" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+          <div className="unified-header-logos">
+            {HEADER_LEFT_LOGOS.map(logo => (
+              <div key={logo.alt} className="unified-logo-card">
+                <img src={logo.src} alt={logo.alt} style={{ maxHeight: logo.height, maxWidth: '100%', objectFit: 'contain' }} />
+              </div>
+            ))}
           </div>
         </div>
-        {/* ═══════════════════════════════════════════════════════════ */}
 
         <header style={{ background: palette.header, borderBottom: `1px solid ${palette.border}`, position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(16px)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.28)' : '0 12px 34px rgba(31,56,100,.10)' }}>
           <div style={{ maxWidth: 1460, margin: '0 auto', padding: '6px 20px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', overflowX: 'auto' }}>
 
-            {/* File info — left */}
+            {/* File info - left */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginRight: 4 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: palette.text, whiteSpace: 'nowrap' }}>{fileName}</span>
             </div>
@@ -849,12 +1004,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
             {/* Nav scroll buttons */}
             {['kpi-section', 'summary-section', 'charts-section', 'risk-register-section'].map(id => (
-              <button key={id} type="button" onClick={() => scrollToSection(id)}
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', color: isDark ? '#e0f2fe' : '#0f172a', borderRadius: 999, padding: '5px 12px', fontSize: 10, fontWeight: 800, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', height: 30, fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+              <DashboardButton key={id} palette={palette} onClick={() => scrollToSection(id)}>
                 {id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : 'Register'}
-              </button>
+              </DashboardButton>
             ))}
 
             {/* Divider */}
@@ -862,29 +1014,16 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
             {/* Action buttons */}
             {/* Ghost: Expand/Collapse */}
-            <button onClick={toggleAllSections}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+            <DashboardButton onClick={toggleAllSections} palette={palette}>
               {allSectionsExpanded ? <EyeOff size={12} /> : <Eye size={12} />}
               {allSectionsExpanded ? 'Collapse' : 'Expand'}
-            </button>
+            </DashboardButton>
 
             {/* Primary: PDF */}
-            <button onClick={handlePrint}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', border: 'none', borderRadius: 999, padding: '5px 14px', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', boxShadow: '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)', transition: 'transform 180ms ease, box-shadow 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 10px 26px rgba(37,99,235,0.40), inset 0 1px rgba(255,255,255,0.3)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)'; }}>
-              <Printer size={12} />PDF
-            </button>
+            <DashboardButton onClick={handlePrint} palette={palette} tone="accent" fileType="pdf">PDF</DashboardButton>
 
             {/* Primary: PNG */}
-            <button onClick={() => exportElementAsPNG(dashboardRef, 'Risk_Full_Dashboard.png', bgForExport)}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', border: 'none', borderRadius: 999, padding: '5px 14px', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', boxShadow: '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)', transition: 'transform 180ms ease, box-shadow 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 10px 26px rgba(37,99,235,0.40), inset 0 1px rgba(255,255,255,0.3)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)'; }}>
-              <ImageDown size={12} />PNG
-            </button>
+            <DashboardButton onClick={() => exportElementAsPNG(dashboardRef, 'Risk_Full_Dashboard.png', bgForExport)} palette={palette} tone="accent" fileType="png">PNG</DashboardButton>
 
             {/* Segmented pill theme toggle */}
             <div style={{ display: 'inline-flex', alignItems: 'center', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: 2, gap: 0, flexShrink: 0, backdropFilter: 'blur(8px)', height: 30 }}>
@@ -901,30 +1040,24 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
 
             {/* Ghost: Home */}
-            <button onClick={onReset}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+            <DashboardButton onClick={onReset} palette={palette}>
               <Home size={12} />Home
-            </button>
+            </DashboardButton>
 
             {/* Ghost: New File */}
-            <button onClick={onReset}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
+            <DashboardButton onClick={onReset} palette={palette}>
               <Upload size={12} />New File
-            </button>
+            </DashboardButton>
 
           </div>
         </header>
 
-        <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundAttachment: 'fixed' }}>
+        <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundRepeat: 'no-repeat', backgroundAttachment: 'fixed' }}>
         <main style={{ maxWidth: 1460, margin: '0 auto', padding: '12px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
 
 
-          <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
+          <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)} tone="accent" fileType="png">PNG</SmallActionButton></>}>
             <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 9 }}>
               <KpiTile label="Total Risks" value={normalizedKpis.totalRisks} color={SE.navy} selectedWeek={selectedWeek} index={0} palette={palette} />
               <KpiTile label="Total Mitigation" value={normalizedKpis.totalMitigation} color={SE.blue} selectedWeek={selectedWeek} index={1} palette={palette} />
@@ -935,14 +1068,33 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          <SectionCard id="summary-section" title="Professional Risk Movement Summary" palette={palette} bodyRef={summaryRef} compact open={sectionOpen['summary-section']} onOpenChange={open => setSingleSectionOpen('summary-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(summaryRef, 'Risk_Movement_Summary.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          <SectionCard id="summary-section" title="Professional Risk Movement Summary" palette={palette} bodyRef={summaryRef} compact open={sectionOpen['summary-section']} onOpenChange={open => setSingleSectionOpen('summary-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(summaryRef, 'Risk_Movement_Summary.png', bgForExport)} tone="accent" fileType="png">PNG</SmallActionButton>}>
+            {validation && (
+              <div style={{ background: validation.warnings.length ? (isDark ? 'rgba(120,53,15,.46)' : 'rgba(255,251,235,.88)') : palette.cardSoft, border: `1px solid ${validation.warnings.length ? SE.gold : palette.border}`, borderRadius: 14, padding: '10px 12px', marginBottom: 10, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 10, alignItems: 'start' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 12, display: 'grid', placeItems: 'center', background: validation.warnings.length ? SE.gold : SE.teal, color: 'white' }}>
+                  {validation.warnings.length ? <AlertTriangle size={17} /> : <ClipboardCheck size={17} />}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ color: palette.text, fontSize: 11, fontWeight: 950, textTransform: 'uppercase' }}>Upload Validation</span>
+                    <span style={{ color: palette.muted, fontSize: 10, fontWeight: 800 }}>Sheet: {validation.sheetName}</span>
+                    <span style={{ color: palette.muted, fontSize: 10, fontWeight: 800 }}>Weeks: {validation.detectedWeeks.length}</span>
+                    <span style={{ color: palette.muted, fontSize: 10, fontWeight: 800 }}>Risks: {validation.riskCount}</span>
+                    <span style={{ color: palette.muted, fontSize: 10, fontWeight: 800 }}>Mitigations: {validation.mitigationCount}</span>
+                  </div>
+                  <div style={{ marginTop: 4, color: validation.warnings.length ? SE.gold : SE.green, fontSize: 10, fontWeight: 850 }}>
+                    {validation.warnings.length ? validation.warnings.join(' ') : `Workbook structure looks good. Detected weeks: ${validation.detectedWeeks.join(', ') || 'none'}.`}
+                  </div>
+                </div>
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 9 }}>
               {[
                 { label: 'Improved vs Previous Week', value: changesSummary.improved, sub: `${changesSummary.total} filtered risks`, color: SE.green, icon: <TrendingUp size={16} /> },
                 { label: 'Declined vs Previous Week', value: changesSummary.declined, sub: 'Needs management attention', color: SE.red, icon: <TrendingDown size={16} /> },
                 { label: 'Overdue Mitigations', value: professionalSummary.overdue, sub: 'Open risks past closing date', color: SE.orange, icon: <EyeOff size={16} /> },
                 { label: 'Completed Actions', value: professionalSummary.completed, sub: `${professionalSummary.completedPct}% of risk register`, color: SE.teal, icon: <Eye size={16} /> },
-                { label: 'High-Risk Ownership', value: professionalSummary.highRiskOwnerCount, sub: `${professionalSummary.highRiskOwner} · ${professionalSummary.highRiskTotal} high risks`, color: SE.blue, icon: <BarChart2 size={16} /> },
+                { label: 'High-Risk Ownership', value: professionalSummary.highRiskOwnerCount, sub: `${professionalSummary.highRiskOwner} - ${professionalSummary.highRiskTotal} high risks`, color: SE.blue, icon: <BarChart2 size={16} /> },
               ].map(card => (
                 <div key={card.label} style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 15, padding: '12px 12px', display: 'flex', gap: 10, alignItems: 'center', minHeight: 76 }}>
                   <div style={{ width: 38, height: 38, borderRadius: 13, display: 'grid', placeItems: 'center', background: card.color, color: 'white', flexShrink: 0 }}>{card.icon}</div>
@@ -954,9 +1106,119 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 </div>
               ))}
             </div>
+
+            <div className="summary-row" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 10, marginTop: 10 }}>
+              <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 15, padding: 12, minWidth: 0 }}>
+                <h3 style={chartTitle(palette)}>Owner Accountability Matrix</h3>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 10 }}>
+                    <thead>
+                      <tr style={{ color: palette.muted, textTransform: 'uppercase' }}>
+                        {['Owner', 'Total', 'High', 'Overdue', 'Done', 'Avg'].map(label => <th key={label} style={{ textAlign: label === 'Owner' ? 'left' : 'center', padding: '7px 8px', borderBottom: `1px solid ${palette.border}`, fontWeight: 950 }}>{label}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ownerAccountabilityData.slice(0, 8).map(owner => (
+                        <tr key={owner.owner}>
+                          <td style={{ padding: '7px 8px', color: palette.text, fontWeight: 850, borderBottom: `1px solid ${palette.border}`, whiteSpace: 'nowrap' }}>{owner.owner}</td>
+                          <td style={matrixTd(palette)}>{owner.total}</td>
+                          <td style={{ ...matrixTd(palette), color: owner.high ? SE.orange : palette.muted }}>{owner.high}</td>
+                          <td style={{ ...matrixTd(palette), color: owner.overdue ? SE.red : palette.muted }}>{owner.overdue}</td>
+                          <td style={{ ...matrixTd(palette), color: owner.completed ? SE.green : palette.muted }}>{owner.completed}</td>
+                          <td style={{ ...matrixTd(palette), color: owner.avgPct >= 80 ? SE.green : owner.avgPct >= 50 ? SE.gold : SE.red }}>{owner.avgPct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 15, padding: 12, minWidth: 0 }}>
+                <h3 style={chartTitle(palette)}>Top Overdue Open Risks</h3>
+                {overdueRisks.length ? (
+                  <div style={{ display: 'grid', gap: 7 }}>
+                    {overdueRisks.map(risk => (
+                      <button key={risk.id} type="button" onClick={() => setActiveRisk(risk)} style={{ border: `1px solid ${palette.border}`, background: palette.cardSolid, color: palette.text, borderRadius: 12, padding: '8px 10px', textAlign: 'left', cursor: 'pointer', display: 'grid', gap: 3 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 950, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{risk.title}</span>
+                        <span style={{ fontSize: 9.5, color: palette.muted, fontWeight: 800 }}>{risk.owner || 'Unassigned'} - {risk.closingDate || 'No date'} - {risk.currentPct}% complete</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: SE.green, fontSize: 12, fontWeight: 900, minHeight: 86, display: 'grid', placeItems: 'center', textAlign: 'center' }}>No overdue open risks detected</div>
+                )}
+              </div>
+            </div>
           </SectionCard>
 
-          <SectionCard id="charts-section" title="Professional Risk Analytics Charts" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          <SectionCard id="charts-section" title="Professional Risk Analytics Charts" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'Risk_Analytics_Charts.png', bgForExport)} tone="accent" fileType="png">PNG</SmallActionButton>}>
+
+            {/* Mitigation Plans Progress - full-width multi-week trend */}
+            <div style={{ ...chartBox(palette), marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                <h3 style={chartTitle(palette)}>Mitigation Plans Progress - Expected Target vs Actual</h3>
+                {weeklyTargetVsActualData.length > 0 && (() => {
+                  const last = weeklyTargetVsActualData[weeklyTargetVsActualData.length - 1];
+                  const isBelow = last.dev < 0;
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: isBelow ? 'rgba(192,57,43,.13)' : 'rgba(39,174,96,.13)', border: `1px solid ${isBelow ? SE.red : SE.green}`, borderRadius: 10, padding: '5px 14px' }}>
+                      <span style={{ fontSize: 22, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, color: isBelow ? SE.red : SE.green }}>{last.avgActual}%</span>
+                      <span style={{ fontSize: 11, color: palette.muted, fontWeight: 700 }}>Actual</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: palette.text }}>/</span>
+                      <span style={{ fontSize: 22, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, color: SE.blue }}>{last.avgTarget}%</span>
+                      <span style={{ fontSize: 11, color: palette.muted, fontWeight: 700 }}>Target</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: isBelow ? SE.red : SE.green, marginLeft: 6 }}>
+                        {isBelow ? 'v' : '^'} Dev {Math.abs(last.dev)}%
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: isBelow ? SE.red : SE.green }}>{isBelow ? 'Below target' : 'Above target'}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={weeklyTargetVsActualData} margin={{ top: 14, right: 20, left: 0, bottom: 4 }} barCategoryGap="30%" barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                  <XAxis dataKey="week" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = weeklyTargetVsActualData.find(x => x.week === label);
+                      const dev = d ? d.dev : 0;
+                      const isBelow = dev < 0;
+                      return (
+                        <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '10px 14px', fontSize: 12, boxShadow: '0 4px 16px rgba(0,0,0,.18)' }}>
+                          <div style={{ fontWeight: 900, color: palette.text, marginBottom: 6 }}>{label}</div>
+                          {payload.map((p: any) => (
+                            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                              <span style={{ width: 10, height: 10, borderRadius: 3, background: p.fill, display: 'inline-block' }} />
+                              <span style={{ color: palette.muted }}>{p.name}:</span>
+                              <span style={{ fontWeight: 800, color: palette.text }}>{p.value}%</span>
+                            </div>
+                          ))}
+                          <div style={{ marginTop: 6, borderTop: `1px solid ${palette.border}`, paddingTop: 5, fontWeight: 800, color: isBelow ? SE.red : SE.green }}>
+                            Dev: {isBelow ? '' : '+'}{dev}% - {isBelow ? 'Below target' : 'Above target'}
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
+                  <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 11 }} formatter={v => <span style={{ color: palette.muted, fontSize: 11 }}>{v}</span>} />
+                  <Bar dataKey="avgTarget" name="Avg Target %" fill={SE.blue} radius={[5, 5, 0, 0]} animationDuration={650}
+                    label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: SE.blue, formatter: (v: number) => `${v}%` }}
+                  />
+                  <Bar dataKey="avgActual" name="Avg Actual %" fill={SE.red} radius={[5, 5, 0, 0]} animationDuration={650}
+                    label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: SE.red, formatter: (v: number) => `${v}%` }}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+              <div style={legendStyle}>
+                <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.blue, borderRadius: 2 }} />Avg Target %</span>
+                <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.red, borderRadius: 2 }} />Avg Actual %</span>
+                <span style={{ ...legendItem(palette), marginLeft: 'auto', fontSize: 10, color: palette.muted }}>Expected target assumes equal progress across reporting weeks.</span>
+              </div>
+            </div>
+
             <div className="professional-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>1. Risk Category Donut</h3>
@@ -992,7 +1254,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               </div>
             </div>
 
-            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1.1fr .9fr', gap: 10, marginTop: 10 }}>
+            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>4. Weekly Movement Line Chart</h3>
                 <ResponsiveContainer width="100%" height={260}>
@@ -1010,8 +1272,43 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 </ResponsiveContainer>
               </div>
 
+              {/* Chart 5 - Overdue */}
               <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>5. Risks by Owner</h3>
+                <h3 style={chartTitle(palette)}>5. Overdue Mitigation Bar Chart</h3>
+                {overdueByOwnerData.length > 0 ? <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={overdueByOwnerData} layout="vertical" margin={{ top: 8, right: 38, left: 4, bottom: 6 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+                    <XAxis type="number" tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} domain={[0, Math.max(2, ...overdueByOwnerData.map(d => d.overdue)) + 1]} />
+                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={130} axisLine={false} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="overdue" name="Overdue Open Risks" fill={SE.orange} radius={[0, 8, 8, 0]} animationDuration={650} label={{ position: 'right', fontSize: 11, fontWeight: 900, fill: palette.text }} />
+                  </BarChart>
+                </ResponsiveContainer> : <div style={{ height: 220, display: 'grid', placeItems: 'center', color: SE.green, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>No overdue open mitigations detected</div>}
+              </div>
+
+              {/* Chart 6 - Risk Progress Status */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>6. Risk Progress Status</h3>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={progressData} margin={{ top: 14, right: 16, left: 0, bottom: 4 }} barCategoryGap="35%">
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="value" name="Risks" radius={[6, 6, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 13, fontWeight: 900, fill: palette.text }}>
+                      {progressData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div style={legendStyle}>{progressData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.fullName}</span>)}</div>
+              </div>
+            </div>
+
+            {/* Row 3: Chart 7 + Mitigation Progress Detail */}
+            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+              {/* Chart 7 */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>7. Risks by Owner</h3>
                 <ResponsiveContainer width="100%" height={Math.max(260, ownerHighRiskData.length * 38)}>
                   <BarChart
                     data={ownerHighRiskData}
@@ -1038,7 +1335,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                               </div>
                             ))}
                             {d && d.highCount > 0 && (
-                              <div style={{ marginTop: 4, fontSize: 10, color: SE.orange, fontWeight: 600 }}>⚠ {d.highCount} high-risk (score ≥15)</div>
+                              <div style={{ marginTop: 4, fontSize: 10, color: SE.orange, fontWeight: 600 }}>Warning: {d.highCount} high-risk (score &gt;=15)</div>
                             )}
                           </div>
                         );
@@ -1056,42 +1353,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-                <div style={legendStyle}>{[[SE.blue, 'Risk Count'], [SE.green, 'Avg Progress ≥80%'], [SE.gold, '50–79%'], [SE.red, '<50%']].map(([c, l]) => <span key={l} style={legendItem(palette)}><span style={{ width: 12, height: 7, background: c, borderRadius: 2 }} />{l}</span>)}</div>
+                <div style={legendStyle}>{[[SE.blue, 'Risk Count'], [SE.green, 'Avg Progress >=80%'], [SE.gold, '50-79%'], [SE.red, '<50%']].map(([c, l]) => <span key={l} style={legendItem(palette)}><span style={{ width: 12, height: 7, background: c, borderRadius: 2 }} />{l}</span>)}</div>
               </div>
-            </div>
 
-            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
+
               <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>6. Risk Progress Status</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={progressData} margin={{ top: 14, right: 16, left: 0, bottom: 4 }} barCategoryGap="35%">
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="value" name="Risks" radius={[6, 6, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 13, fontWeight: 900, fill: palette.text }}>
-                      {progressData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={legendStyle}>{progressData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.fullName}</span>)}</div>
-              </div>
-
-              <div style={{ ...chartBox(palette), gridColumn: 'span 2' }}>
-                <h3 style={chartTitle(palette)}>7. Overdue Mitigation Bar Chart</h3>
-                {overdueByOwnerData.length > 0 ? <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={overdueByOwnerData} layout="vertical" margin={{ top: 8, right: 38, left: 4, bottom: 6 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-                    <XAxis type="number" tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} domain={[0, Math.max(2, ...overdueByOwnerData.map(d => d.overdue)) + 1]} />
-                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={130} axisLine={false} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="overdue" name="Overdue Open Risks" fill={SE.orange} radius={[0, 8, 8, 0]} animationDuration={650} label={{ position: 'right', fontSize: 11, fontWeight: 900, fill: palette.text }} />
-                  </BarChart>
-                </ResponsiveContainer> : <div style={{ height: 250, display: 'grid', placeItems: 'center', color: SE.green, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>No overdue open mitigations detected</div>}
-              </div>
-
-              <div style={{ ...chartBox(palette), gridColumn: 'span 2' }}>
-                <h3 style={chartTitle(palette)}>Mitigation Progress Detail — {selectedWeek || period}</h3>
+                <h3 style={chartTitle(palette)}>Mitigation Progress Detail - {selectedWeek || period}</h3>
                 <div style={{ paddingRight: 4 }}>
                   <ResponsiveContainer width="100%" height={Math.max(240, detailData.length * 28)}>
                     <BarChart data={detailData} layout="vertical" margin={{ top: 4, right: 54, left: 6, bottom: 4 }}>
@@ -1110,14 +1377,14 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          <SectionCard id="risk-register-section" title={`Risk Register — ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} open={sectionOpen['risk-register-section']} onOpenChange={open => setSingleSectionOpen('risk-register-section', open)} actions={<><SmallActionButton palette={palette} onClick={exportRisksToExcel}><FileSpreadsheet size={12} />Excel</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'Risk_Register.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
+          <SectionCard id="risk-register-section" title={`Risk Register - ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} open={sectionOpen['risk-register-section']} onOpenChange={open => setSingleSectionOpen('risk-register-section', open)} actions={<><SmallActionButton palette={palette} onClick={exportFilteredRisksToExcel} fileType="excel">Excel</SmallActionButton><SmallActionButton palette={palette} onClick={exportAllRisksToExcel} fileType="excel">All</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'Risk_Register.png', bgForExport)} tone="accent" fileType="png">PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
             <div className="no-print" style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 900 }}><Filter size={13} />Filters</span>
-              <div style={{ position: 'relative' }}><Search size={13} style={{ position: 'absolute', left: 12, top: 10, color: palette.muted }} /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search title, mitigation, owner…" style={inputStyle} /></div>
+              <div style={{ position: 'relative' }}><Search size={13} style={{ position: 'absolute', left: 12, top: 10, color: palette.muted }} /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search title, mitigation, owner..." style={inputStyle} /></div>
               <select value={filterRating} onChange={e => setFilterRating(e.target.value)} style={selectStyle}>{uniqueRatings.map(r => <option key={r} value={r}>{r === 'All' ? 'All Ratings' : r}</option>)}</select>
               <select value={filterOwner} onChange={e => setFilterOwner(e.target.value)} style={selectStyle}>{uniqueOwners.map(o => <option key={o} value={o}>{o === 'All' ? 'All Owners' : o}</option>)}</select>
               <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={selectStyle}>{uniqueStatuses.map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}</select>
-              {hasFilters && <button onClick={resetFilters} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.border}`, borderRadius: 999, background: palette.cardSolid, color: palette.text, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}><RotateCcw size={12} />Clear</button>}
+              {hasFilters && <DashboardButton onClick={resetFilters} palette={palette}><RotateCcw size={12} />Clear</DashboardButton>}
               <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 800 }}>Showing {filteredRisks.length} of {riskRegister.length}</span>
             </div>
 
@@ -1145,13 +1412,13 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                       <tr key={row.id} onClick={() => setActiveRisk(row)} style={{ background: rowBg, cursor: 'pointer' }} onMouseEnter={e => { if (!isActive && !isHighScore) e.currentTarget.style.background = palette.tableHover; }} onMouseLeave={e => { if (!isActive && !isHighScore) e.currentTarget.style.background = i % 2 === 0 ? palette.tableStripe : palette.cardSolid; }}>
                         <td style={tableTd(textColor, palette)}><div style={{ maxWidth: 210, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isHighScore ? 900 : 700 }} title={row.title}>{row.title}</div></td>
                         <td style={tableTd(textColor, palette)}><div style={{ maxWidth: 310, maxHeight: 40, overflow: 'hidden', lineHeight: 1.35, fontSize: 10 }} title={row.mitigation}>{row.mitigation}</div></td>
-                        <td style={tableTd(textColor, palette)}>{row.owner || '–'}</td>
+                        <td style={tableTd(textColor, palette)}>{row.owner || '-'}</td>
                         <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}><ScoreBadge score={row.score} /></td>
                         <td style={{ ...tableTd(isActive || isHighScore ? 'white' : getRatingColor(row.rating), palette), fontWeight: 900 }}>{row.rating}</td>
-                        <td style={tableTd(textColor, palette)}>{row.closingDate || '–'}</td>
-                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}>{weeks?.length > 1 ? <Sparkline weekProgress={row.weekProgress} weeks={weeks} /> : <span style={{ color: palette.muted }}>–</span>}</td>
-                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900 }}>{row.currentPct > 0 ? `${row.currentPct}%` : '–'}</td>
-                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900 }}>{row.beforePct > 0 ? `${row.beforePct}%` : '–'}</td>
+                        <td style={tableTd(textColor, palette)}>{row.closingDate || '-'}</td>
+                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}>{weeks?.length > 1 ? <Sparkline weekProgress={row.weekProgress} weeks={weeks} /> : <span style={{ color: palette.muted }}>-</span>}</td>
+                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900 }}>{row.currentPct > 0 ? `${row.currentPct}%` : '-'}</td>
+                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900 }}>{row.beforePct > 0 ? `${row.beforePct}%` : '-'}</td>
                         <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}><ChangeIndicator dev={row.developmentPct} /></td>
                       </tr>
                     );
@@ -1161,7 +1428,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>
 
-          {activeRisk && <SectionCard id="selected-risk-section" title={`Selected Risk Detail — ${activeRisk.title}`} palette={palette} bodyRef={selectedRef} open={sectionOpen['selected-risk-section']} onOpenChange={open => setSingleSectionOpen('selected-risk-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'Risk_Selected_Detail.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          {activeRisk && <SectionCard id="selected-risk-section" title={`Selected Risk Detail - ${activeRisk.title}`} palette={palette} bodyRef={selectedRef} open={sectionOpen['selected-risk-section']} onOpenChange={open => setSingleSectionOpen('selected-risk-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'Risk_Selected_Detail.png', bgForExport)} tone="accent" fileType="png">PNG</SmallActionButton>}>
             <div className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 14, alignItems: 'start' }}>
               <div style={chartBox(palette)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><ScoreBadge score={activeRisk.score} /><span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 950, fontSize: 12 }}>{activeRisk.rating}</span><span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span></div>
@@ -1181,9 +1448,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 <h3 style={{ margin: 0, fontFamily: 'DM Sans, sans-serif', fontSize: 14, fontWeight: 950, color: palette.text }}>Mitigation Plan</h3>
                 <p style={{ whiteSpace: 'pre-line', fontSize: 12, lineHeight: 1.6, color: palette.muted, marginTop: 8 }}>{activeRisk.mitigation || 'No mitigation details available.'}</p>
                 <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                  <div style={miniMetric(palette)}><span>Owner</span><strong>{activeRisk.owner || '–'}</strong></div>
-                  <div style={miniMetric(palette)}><span>Closing Date</span><strong>{activeRisk.closingDate || '–'}</strong></div>
-                  <div style={miniMetric(palette)}><span>Status</span><strong>{activeRisk.progressStatus || '–'}</strong></div>
+                  <div style={miniMetric(palette)}><span>Owner</span><strong>{activeRisk.owner || '-'}</strong></div>
+                  <div style={miniMetric(palette)}><span>Closing Date</span><strong>{activeRisk.closingDate || '-'}</strong></div>
+                  <div style={miniMetric(palette)}><span>Status</span><strong>{activeRisk.progressStatus || '-'}</strong></div>
                 </div>
                 {weeks?.length > 1 && <div style={{ marginTop: 12, padding: 10, borderRadius: 12, background: palette.cardSolid, border: `1px solid ${palette.border}` }}>
                   <div style={{ fontSize: 10, color: palette.muted, marginBottom: 6, fontWeight: 900 }}>Progress trend across all weeks</div>
@@ -1200,7 +1467,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </SectionCard>}
 
-          <footer style={{ textAlign: 'center', fontSize: 10, color: palette.muted, padding: '3px 0 10px' }}>Risk Management Dashboard · {period} · Click any risk row to update selected risk detail</footer>
+          <footer style={{ textAlign: 'center', fontSize: 10, color: palette.muted, padding: '3px 0 10px' }}>Risk Management Dashboard - {period} - Click any risk row to update selected risk detail</footer>
         </main>
         </div>
       </div>
@@ -1232,4 +1499,8 @@ function pillCircle(color: string): CSSProperties {
 
 function tableTd(color: string, palette: ThemePalette): CSSProperties {
   return { padding: '7px 9px', color, borderBottom: `1px solid ${palette.border}`, borderRight: `1px solid ${palette.border}`, whiteSpace: 'nowrap', verticalAlign: 'middle' };
+}
+
+function matrixTd(palette: ThemePalette): CSSProperties {
+  return { padding: '7px 8px', color: palette.text, borderBottom: `1px solid ${palette.border}`, textAlign: 'center', fontWeight: 950, whiteSpace: 'nowrap' };
 }

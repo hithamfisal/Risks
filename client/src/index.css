@@ -174,11 +174,11 @@
   }
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
+/*
    Professional dashboard refinements
    Keeps the UI compact at 100% browser zoom and makes dark/light surfaces
    more consistent for native controls, sticky tables and export captures.
-   ────────────────────────────────────────────────────────────────────────── */
+*/
 .dashboard-shell {
   color-scheme: light;
 }
@@ -187,6 +187,60 @@
 }
 .dashboard-section {
   scroll-margin-top: 78px;
+}
+.unified-dashboard-banner {
+  width: 100%;
+  min-height: 78px;
+  padding: 10px 16px;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 190px;
+  align-items: center;
+  gap: 12px;
+  backdrop-filter: blur(14px);
+}
+.unified-logo-card {
+  height: 42px;
+  width: 72px;
+  padding: 5px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+}
+.unified-logo-card-main {
+  height: 48px;
+  width: 86px;
+}
+.unified-title-block {
+  min-width: 0;
+  text-align: center;
+}
+.unified-title-block h1 {
+  margin: 0;
+  color: currentColor;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 21px;
+  font-weight: 950;
+  font-style: italic;
+  line-height: 1.05;
+  text-transform: uppercase;
+}
+.unified-title-block p {
+  margin: 4px 0 0;
+  color: #38bdf8;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.unified-header-logos {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
 }
 .section-export-body {
   background: transparent;
@@ -207,6 +261,21 @@
 .dashboard-shell button {
   font-family: 'Inter', sans-serif;
 }
+.dashboard-action-button,
+.dashboard-action-button svg {
+  color: currentColor;
+}
+.dashboard-action-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.dashboard-action-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.dashboard-action-button:disabled {
+  pointer-events: none;
+}
 .dashboard-shell ::-webkit-scrollbar {
   width: 9px;
   height: 9px;
@@ -221,6 +290,12 @@
 }
 
 @media (max-width: 1180px) {
+  .unified-dashboard-banner {
+    grid-template-columns: 104px minmax(0, 1fr) 104px;
+  }
+  .unified-header-logos {
+    flex-wrap: wrap;
+  }
   .kpi-row,
   .chart-row,
   .summary-row {
@@ -229,6 +304,14 @@
 }
 
 @media (max-width: 760px) {
+  .unified-dashboard-banner {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    min-height: auto;
+  }
+  .unified-header-logos {
+    justify-content: center;
+  }
   .kpi-row,
   .chart-row,
   .summary-row {
