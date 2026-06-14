@@ -1,5 +1,5 @@
 /**
- * Home - orchestrates Upload to Dashboard flow with week switching
+ * Home — orchestrates Upload → Dashboard flow with week switching
  */
 import { useState } from 'react';
 import UploadPage from './Upload';
@@ -7,46 +7,35 @@ import DashboardPage from './Dashboard';
 import { DashboardData, switchWeek } from '@/lib/excelParser';
 
 const LAST_UPLOAD_KEY = 'tnoc-risk-dashboard:last-upload:v1';
-const LAST_UPLOAD_LIST_KEY = 'tnoc-risk-dashboard:last-uploads:v2';
-const MAX_RECENT_UPLOADS = 5;
 
 type LastUploadPayload = {
-  id?: string;
   data: DashboardData;
   fileName: string;
   savedAt: string;
 };
 
-function readLastUploads(): LastUploadPayload[] {
+function readLastUpload(): LastUploadPayload | null {
   try {
-    const listRaw = window.localStorage.getItem(LAST_UPLOAD_LIST_KEY);
-    if (listRaw) {
-      const parsed = JSON.parse(listRaw) as LastUploadPayload[];
-      return parsed.filter(item => item?.data?.riskRegister?.length).map(item => ({ ...item, id: item.id || `${item.savedAt}-${item.fileName}` }));
-    }
-
     const raw = window.localStorage.getItem(LAST_UPLOAD_KEY);
-    if (!raw) return [];
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as LastUploadPayload;
-    if (!parsed?.data?.riskRegister?.length) return [];
-    return [{ ...parsed, id: `${parsed.savedAt}-${parsed.fileName}` }];
+    if (!parsed?.data?.riskRegister?.length) return null;
+    return parsed;
   } catch {
-    return [];
+    return null;
   }
 }
 
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [fileName, setFileName] = useState('');
-  const [lastUploads, setLastUploads] = useState<LastUploadPayload[]>(() => readLastUploads());
+  const [lastUpload, setLastUpload] = useState<LastUploadPayload | null>(() => readLastUpload());
 
   function saveLastUpload(d: DashboardData, name: string) {
     try {
-      const payload: LastUploadPayload = { id: `${Date.now()}-${name}`, data: d, fileName: name, savedAt: new Date().toISOString() };
-      const nextUploads = [payload, ...lastUploads.filter(item => item.fileName !== name)].slice(0, MAX_RECENT_UPLOADS);
+      const payload: LastUploadPayload = { data: d, fileName: name, savedAt: new Date().toISOString() };
       window.localStorage.setItem(LAST_UPLOAD_KEY, JSON.stringify(payload));
-      window.localStorage.setItem(LAST_UPLOAD_LIST_KEY, JSON.stringify(nextUploads));
-      setLastUploads(nextUploads);
+      setLastUpload(payload);
     } catch {
       // Local storage can be blocked or full; dashboard should still work normally.
     }
@@ -58,22 +47,19 @@ export default function Home() {
     setFileName(name);
   }
 
-  function handlePreviousUpload(id: string) {
-    const upload = lastUploads.find(item => item.id === id);
-    if (!upload) return;
-    setData(upload.data);
-    setFileName(upload.fileName);
+  function handlePreviousUpload() {
+    if (!lastUpload) return;
+    setData(lastUpload.data);
+    setFileName(lastUpload.fileName);
   }
 
-  function handleClearPreviousUpload(id: string) {
-    const nextUploads = lastUploads.filter(item => item.id !== id);
+  function handleClearPreviousUpload() {
     try {
-      window.localStorage.setItem(LAST_UPLOAD_LIST_KEY, JSON.stringify(nextUploads));
-      if (nextUploads.length === 0) window.localStorage.removeItem(LAST_UPLOAD_KEY);
+      window.localStorage.removeItem(LAST_UPLOAD_KEY);
     } catch {
       // Ignore storage errors.
     }
-    setLastUploads(nextUploads);
+    setLastUpload(null);
     setData(null);
     setFileName('');
   }
@@ -102,7 +88,7 @@ export default function Home() {
   return (
     <UploadPage
       onDataLoaded={handleDataLoaded}
-      previousUploads={lastUploads.map(upload => ({ id: upload.id || `${upload.savedAt}-${upload.fileName}`, fileName: upload.fileName, savedAt: upload.savedAt, riskCount: upload.data.kpis.totalRisks || upload.data.riskRegister.length }))}
+      previousUpload={lastUpload ? { fileName: lastUpload.fileName, savedAt: lastUpload.savedAt, riskCount: lastUpload.data.kpis.totalRisks || lastUpload.data.riskRegister.length } : null}
       onLoadPrevious={handlePreviousUpload}
       onClearPrevious={handleClearPreviousUpload}
     />
