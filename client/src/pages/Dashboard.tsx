@@ -464,7 +464,7 @@ interface Props {
 }
 
 export default function DashboardPage({ data, fileName, onReset, onWeekChange }: Props) {
-  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel } = data;
+  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel, residualData } = data;
 
   // Normalize target KPI math at the display layer as a safety guard.
   // Total Risks is the risk-category total from Excel Output, not Total Mitigation.
@@ -1138,6 +1138,105 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 <div style={legendStyle}>{progressData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.fullName}</span>)}</div>
               </div>
             </div>
+
+            {/* Residual Risk Distribution + Avg Inherent vs Residual Score */}
+            {residualData && (
+              <div style={{ ...chartBox(palette), marginBottom: 10 }}>
+                {/* Section title */}
+                <h3 style={{ ...chartTitle(palette), marginBottom: 10 }}>RESIDUAL RISK DISTRIBUTION</h3>
+
+                {/* Legend row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 8, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Very High', color: ZONE_COLORS['Very High'] },
+                    { label: 'High',      color: ZONE_COLORS.High },
+                    { label: 'Moderate',  color: ZONE_COLORS.Moderate },
+                    { label: 'Low',       color: ZONE_COLORS.Low },
+                  ].map(z => (
+                    <span key={z.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: palette.text }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: z.color, display: 'inline-block' }} />
+                      {z.label}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Stacked proportion bar */}
+                {(() => {
+                  const zc = residualData.zoneCounts;
+                  const total = (zc.veryHigh + zc.high + zc.moderate + zc.low + zc.veryLow) || 1;
+                  const segments = [
+                    { key: 'veryHigh', color: ZONE_COLORS['Very High'], count: zc.veryHigh },
+                    { key: 'high',     color: ZONE_COLORS.High,         count: zc.high },
+                    { key: 'moderate', color: ZONE_COLORS.Moderate,     count: zc.moderate },
+                    { key: 'low',      color: ZONE_COLORS.Low,          count: zc.low },
+                    { key: 'veryLow',  color: ZONE_COLORS['Very Low'],   count: zc.veryLow },
+                  ].filter(s => s.count > 0);
+                  return (
+                    <div style={{ display: 'flex', height: 28, borderRadius: 8, overflow: 'hidden', width: '100%', marginBottom: 12 }}>
+                      {segments.map(s => (
+                        <div
+                          key={s.key}
+                          title={`${s.count} risk${s.count !== 1 ? 's' : ''}`}
+                          style={{
+                            flex: s.count / total,
+                            background: s.color,
+                            transition: 'flex 0.4s ease',
+                          }}
+                        />
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* Zone count tiles */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 16 }}>
+                  {[
+                    { label: 'Very High', color: ZONE_COLORS['Very High'], count: residualData.zoneCounts.veryHigh },
+                    { label: 'High',      color: ZONE_COLORS.High,         count: residualData.zoneCounts.high },
+                    { label: 'Moderate',  color: ZONE_COLORS.Moderate,     count: residualData.zoneCounts.moderate },
+                    { label: 'Low',       color: ZONE_COLORS.Low,          count: residualData.zoneCounts.low },
+                  ].map(z => (
+                    <div key={z.label} style={{
+                      background: palette.cardSoft,
+                      border: `1px solid ${palette.border}`,
+                      borderRadius: 10,
+                      padding: '10px 0',
+                      textAlign: 'center',
+                    }}>
+                      <div style={{ fontSize: 28, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, color: z.color, lineHeight: 1.1 }}>
+                        <AnimatedNumber value={z.count} />
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: palette.muted, marginTop: 3 }}>{z.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Avg Inherent vs Residual Score */}
+                <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 12 }}>
+                  <h4 style={{ fontSize: 11, fontWeight: 900, letterSpacing: '0.08em', color: palette.muted, textTransform: 'uppercase', marginBottom: 10 }}>AVG INHERENT VS RESIDUAL SCORE</h4>
+                  {[
+                    { label: 'Inherent', value: residualData.avgInherentScore, max: 25, color: SE.red },
+                    { label: 'Residual', value: residualData.avgResidualScore, max: 25, color: SE.gold },
+                  ].map(row => (
+                    <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                      <span style={{ width: 68, fontSize: 11, fontWeight: 700, color: palette.text, flexShrink: 0 }}>{row.label}</span>
+                      <div style={{ flex: 1, height: 16, background: palette.cardSoft, borderRadius: 8, overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${Math.min(100, (row.value / row.max) * 100)}%`,
+                          height: '100%',
+                          background: row.color,
+                          borderRadius: 8,
+                          transition: 'width 0.5s ease',
+                        }} />
+                      </div>
+                      <span style={{ width: 36, textAlign: 'right', fontSize: 13, fontWeight: 900, color: row.color, flexShrink: 0 }}>
+                        {row.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Row 3: Chart 7 + Mitigation Progress Detail */}
             <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
