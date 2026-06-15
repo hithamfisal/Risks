@@ -13,12 +13,15 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   LineChart, Line,
+  ScatterChart, Scatter, ZAxis, ReferenceLine,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import {
   Upload, Printer, TrendingUp, TrendingDown, Minus, Filter, X, BarChart2,
   ChevronDown, ChevronRight, Home, ImageDown, FileSpreadsheet, Search,
   RotateCcw, Download, Eye, EyeOff, Moon, Sun,
+  AlertTriangle, Activity, Layers, Target,
 } from 'lucide-react';
 import { DashboardData, getScoreColor, getRatingColor, type RiskRow } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -464,7 +467,7 @@ interface Props {
 }
 
 export default function DashboardPage({ data, fileName, onReset, onWeekChange }: Props) {
-  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel, residualData } = data;
+  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel, residualData, overdueActions, kriData, taxonomyData, velocityData } = data;
 
   // Normalize target KPI math at the display layer as a safety guard.
   // Total Risks is the risk-category total from Excel Output, not Total Mitigation.
@@ -485,13 +488,43 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const [searchTerm, setSearchTerm] = useState('');
   const [residualFilterRating, setResidualFilterRating] = useState('All');
   const [residualFilterStatus, setResidualFilterStatus] = useState('All');
+
+  // Transitioned to Outputs toggle bar state
+  const OUTPUT_PANELS = [
+    { id: 'op-target-vs-actual',  label: 'Target vs Actual' },
+    { id: 'op-category-donut',    label: 'Risk Category' },
+    { id: 'op-gauge',             label: 'Risk Score' },
+    { id: 'op-heatmap',           label: 'Risk Matrix' },
+    { id: 'op-weekly-movement',   label: 'Weekly Movement' },
+    { id: 'op-overdue-bar',       label: 'Overdue Bar' },
+    { id: 'op-progress-status',   label: 'Progress Status' },
+    { id: 'op-owner-chart',       label: 'By Owner' },
+    { id: 'op-mitigation-detail', label: 'Mitigation Detail' },
+  ] as const;
+  type OutputPanelId = typeof OUTPUT_PANELS[number]['id'];
+  const [outputsVisible, setOutputsVisible] = useState<Record<OutputPanelId, boolean>>(
+    Object.fromEntries(OUTPUT_PANELS.map(p => [p.id, true])) as Record<OutputPanelId, boolean>
+  );
+  const toggleOutput = (id: OutputPanelId) => setOutputsVisible(prev => ({ ...prev, [id]: !prev[id] }));
+  const allOutputsOn = OUTPUT_PANELS.every(p => outputsVisible[p.id]);
+  const toggleAllOutputs = () => {
+    const next = !allOutputsOn;
+    setOutputsVisible(Object.fromEntries(OUTPUT_PANELS.map(p => [p.id, next])) as Record<OutputPanelId, boolean>);
+  };
   const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({
-    'kpi-section': false,
-    'summary-section': false,
-    'charts-section': false,
-    'risk-register-section': false,
-    'residual-analysis-section': false,
-    'selected-risk-section': false,
+    'kpi-section': true,
+    'summary-section': true,
+    'charts-section': true,
+    'pipeline-section': true,
+    'risk-register-section': true,
+    'risk-log-section': true,
+    'residual-analysis-section': true,
+    'overdue-section': true,
+    'kri-section': true,
+    'velocity-section': true,
+    'taxonomy-section': true,
+    'bottom-register-section': true,
+    'sparkline-section': true,
   });
 
   const dashboardRef = useRef<HTMLDivElement>(null);
@@ -501,6 +534,10 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const registerRef = useRef<HTMLDivElement>(null);
   const residualRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
+  const overdueRef = useRef<HTMLDivElement>(null);
+  const kriRef = useRef<HTMLDivElement>(null);
+  const velocityRef = useRef<HTMLDivElement>(null);
+  const taxonomyRef = useRef<HTMLDivElement>(null);
 
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
@@ -739,11 +776,95 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       .slice(0, 5),
   [riskRegister]);
 
+  // ── Step 3: Monthly Threat Frequency by Category ──────────────────────────
+  const monthlyThreatData = useMemo(() => {
+    // Group risks by category, count per week/period label
+    const cats = Array.from(new Set(riskRegister.map(r => r.category || 'Uncategorized'))).slice(0, 6);
+    const catColors: Record<string, string> = {};
+    const palette6 = [SE.red, SE.orange, SE.gold, SE.blue, SE.teal, SE.green];
+    cats.forEach((c, i) => { catColors[c] = palette6[i % palette6.length]; });
+    const data = weeks.map(w => {
+      const row: Record<string, string | number> = { week: w.label };
+      cats.forEach(cat => {
+        row[cat] = riskRegister.filter(r => (r.category || 'Uncategorized') === cat && (r.weekProgress[w.label] ?? 0) > 0).length;
+      });
+      return row;
+    });
+    return { data, cats, catColors };
+  }, [riskRegister, weeks]);
+
+  // ── Step 3: Radar chart — risk score by category ──────────────────────────
+  const radarData = useMemo(() => {
+    const catMap: Record<string, { total: number; count: number }> = {};
+    riskRegister.forEach(r => {
+      const cat = r.category || 'Uncategorized';
+      if (!catMap[cat]) catMap[cat] = { total: 0, count: 0 };
+      catMap[cat].total += r.score;
+      catMap[cat].count += 1;
+    });
+    return Object.entries(catMap)
+      .map(([subject, d]) => ({ subject: subject.length > 18 ? subject.slice(0, 18) + '…' : subject, avgScore: Math.round(d.total / d.count), count: d.count }))
+      .sort((a, b) => b.avgScore - a.avgScore)
+      .slice(0, 8);
+  }, [riskRegister]);
+
+  // ── Step 3: L/I Assessment Status stacked bar ─────────────────────────────
+  const liAssessmentData = useMemo(() => {
+    const buckets: Record<string, { completed: number; inProgress: number; notStarted: number }> = {};
+    riskRegister.forEach(r => {
+      const l = Math.min(5, Math.max(1, Math.round(r.likelihood || 1)));
+      const im = Math.min(5, Math.max(1, Math.round(r.impact || 1)));
+      const key = `L${l}×I${im}`;
+      if (!buckets[key]) buckets[key] = { completed: 0, inProgress: 0, notStarted: 0 };
+      if (r.currentPct >= 100) buckets[key].completed += 1;
+      else if (r.currentPct > 0) buckets[key].inProgress += 1;
+      else buckets[key].notStarted += 1;
+    });
+    return Object.entries(buckets)
+      .map(([key, v]) => ({ key, ...v, total: v.completed + v.inProgress + v.notStarted }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+  }, [riskRegister]);
+
+  // ── Step 9: Sparkline progression per risk ────────────────────────────────
+  const sparklineRisks = useMemo(() => {
+    return [...riskRegister]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 12)
+      .map(r => ({
+        id: r.id,
+        title: r.title.length > 30 ? r.title.slice(0, 30) + '…' : r.title,
+        rating: r.rating,
+        score: r.score,
+        currentPct: r.currentPct,
+        sparkData: weeks.map(w => ({ w: w.label, v: Math.round((r.weekProgress[w.label] ?? 0) * 100) })),
+      }));
+  }, [riskRegister, weeks]);
+
+  // ── Tabbed Risk Log state (Step 5) ────────────────────────────────────────
+  const [riskLogTab, setRiskLogTab] = useState<'all' | 'high' | 'overdue' | 'search'>('all');
+  const [riskLogSearch, setRiskLogSearch] = useState('');
+  const [expandedRiskId, setExpandedRiskId] = useState<string | null>(null);
+  const [riskNotes, setRiskNotes] = useState<Record<string, string>>({});
+  const [noteInput, setNoteInput] = useState<Record<string, string>>({});
+
+  const riskLogFiltered = useMemo(() => {
+    const q = normalise(riskLogSearch);
+    return riskRegister.filter(r => {
+      if (riskLogTab === 'high') return r.score >= 15 || /high/i.test(r.rating);
+      if (riskLogTab === 'overdue') return r.isOverdue;
+      if (riskLogTab === 'search') return q ? normalise(`${r.title} ${r.mitigation} ${r.owner}`).includes(q) : true;
+      return true;
+    });
+  }, [riskRegister, riskLogTab, riskLogSearch]);
+
+  // ── Bottom 4-tab register state (Step 8) ─────────────────────────────────
+  const [bottomTab, setBottomTab] = useState<'all' | 'high' | 'overdue' | 'search'>('all');
+  const [bottomSearch, setBottomSearch] = useState('');
+
   const visibleSectionIds = useMemo(() => {
-    const ids = ['kpi-section', 'summary-section', 'charts-section', 'risk-register-section', 'residual-analysis-section'];
-    if (activeRisk) ids.push('selected-risk-section');
-    return ids;
-  }, [activeRisk]);
+    return ['kpi-section', 'summary-section', 'charts-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section', 'bottom-register-section', 'sparkline-section'];
+  }, []);
 
   const allSectionsExpanded = visibleSectionIds.every(id => sectionOpen[id]);
 
@@ -753,11 +874,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   const toggleAllSections = useCallback(() => {
     setSectionOpen(prev => {
-      const visibleIds = ['kpi-section', 'summary-section', 'charts-section', 'risk-register-section', 'residual-analysis-section', ...(activeRisk ? ['selected-risk-section'] : [])];
+      const visibleIds = ['kpi-section', 'summary-section', 'charts-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section', 'bottom-register-section', 'sparkline-section'];
       const shouldExpand = !visibleIds.every(id => prev[id]);
       return visibleIds.reduce((acc, id) => ({ ...acc, [id]: shouldExpand }), prev);
     });
-  }, [activeRisk]);
+  }, []);
 
   const scrollToSection = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -838,7 +959,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             <img src="/assets/se-logo.png" alt="Saudi Energy" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
           </div>
           <div style={{ flex: 1, textAlign: 'center', zIndex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Risk Management Dashboard</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Enterprise Risk Management Dashboard</div>
             <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Telecom Network Operations Center</div>
           </div>
           <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
@@ -860,7 +981,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
             {/* Week badge */}
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', fontSize: 11, fontWeight: 800, color: isDark ? '#e0f2fe' : '#0f172a', flexShrink: 0, whiteSpace: 'nowrap', backdropFilter: 'blur(8px)' }}>
-              <span style={{ color: isDark ? 'rgba(125,211,252,0.7)' : 'rgba(37,99,235,0.6)', fontWeight: 600, fontSize: 10 }}>Week:</span>
+              <span style={{ color: isDark ? 'rgba(125,211,252,0.7)' : 'rgba(37,99,235,0.6)', fontWeight: 600, fontSize: 10 }}>Period:</span>
               <span style={{ color: isDark ? '#38bdf8' : '#2563eb' }}>{selectedWeek}</span>
               {prevWeekLabel && prevWeekLabel !== selectedWeek && <><span style={{ color: isDark ? 'rgba(125,211,252,0.5)' : 'rgba(37,99,235,0.4)', fontSize: 10 }}>vs</span><span style={{ color: isDark ? '#fbbf24' : '#d97706' }}>{prevWeekLabel}</span></>}
             </div>
@@ -897,12 +1018,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             <div style={{ width: 1, height: 20, background: palette.border, flexShrink: 0 }} />
 
             {/* Nav scroll buttons */}
-            {['kpi-section', 'summary-section', 'charts-section', 'risk-register-section', 'residual-analysis-section'].map(id => (
+            {['kpi-section', 'summary-section', 'charts-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section', 'bottom-register-section', 'sparkline-section'].map(id => (
               <button key={id} type="button" onClick={() => scrollToSection(id)}
                 style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', color: isDark ? '#e0f2fe' : '#0f172a', borderRadius: 999, padding: '5px 12px', fontSize: 10, fontWeight: 800, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', height: 30, fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
-                {id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : id.includes('residual') ? 'Residual' : 'Register'}
+                {id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : id.includes('risk-register') ? 'Register' : id.includes('residual') ? 'Residual' : id.includes('overdue') ? 'Overdue' : id.includes('kri') ? 'KRI' : id.includes('heatmap') ? 'Heat Map' : id.includes('velocity') ? 'Velocity' : 'Taxonomy'}
               </button>
             ))}
 
@@ -974,13 +1095,35 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
 
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
-            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 9 }}>
+            {/* ── Primary 5-tile KPI row (orb style) ── */}
+            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 9 }}>
               <KpiTile label="Total Risks" value={normalizedKpis.totalRisks} color={SE.navy} selectedWeek={selectedWeek} index={0} palette={palette} />
-              <KpiTile label="Total Mitigation" value={normalizedKpis.totalMitigation} color={SE.blue} selectedWeek={selectedWeek} index={1} palette={palette} />
-              <KpiTile label="Above Target" value={normalizedKpis.aboveTarget} color={SE.green} selectedWeek={selectedWeek} index={2} palette={palette} />
-              <KpiTile label="Below Target" value={normalizedKpis.belowTarget} color={SE.red} selectedWeek={selectedWeek} index={3} palette={palette} />
-              <KpiTile label="Avg. Risk Score" value={normalizedKpis.avgRiskScore} color={SE.orange} selectedWeek={selectedWeek} index={4} palette={palette} />
-              <KpiTile label="Avg. Risk Rating" value={normalizedKpis.avgRiskRating} isText color={SE.navy2} selectedWeek={selectedWeek} index={5} palette={palette} />
+              <KpiTile label="Active Threats" value={zoneCounts.veryHigh + zoneCounts.high} color={SE.red} selectedWeek={selectedWeek} index={1} palette={palette} />
+              <KpiTile label="High Severity" value={zoneCounts.veryHigh} color={SE.orange} selectedWeek={selectedWeek} index={2} palette={palette} />
+              <KpiTile label="Overdue Actions" value={professionalSummary.overdue} color={SE.gold} selectedWeek={selectedWeek} index={3} palette={palette} />
+              <KpiTile label="Overall Risk Health" value={normalizedKpis.aboveTarget && normalizedKpis.totalRisks ? Math.round((normalizedKpis.aboveTarget / normalizedKpis.totalRisks) * 100) : 0} color={SE.green} selectedWeek={selectedWeek} index={4} palette={palette} />
+            </div>
+
+            {/* ── Secondary detail row (flat cards) ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 9, marginTop: 10 }}>
+              {[
+                { label: 'Total Risks', value: normalizedKpis.totalRisks, sub: `${selectedWeek}`, color: SE.navy, icon: <Layers size={15} /> },
+                { label: 'Active Threats', value: zoneCounts.veryHigh + zoneCounts.high, sub: 'High + Very High', color: SE.red, icon: <AlertTriangle size={15} /> },
+                { label: 'High Severity', value: zoneCounts.veryHigh, sub: 'Very High zone', color: SE.orange, icon: <Activity size={15} /> },
+                { label: 'Overdue Actions', value: professionalSummary.overdue, sub: 'Past closing date', color: SE.gold, icon: <Target size={15} /> },
+                { label: 'Overall Risk Health', value: `${normalizedKpis.aboveTarget && normalizedKpis.totalRisks ? Math.round((normalizedKpis.aboveTarget / normalizedKpis.totalRisks) * 100) : 0}%`, sub: `${normalizedKpis.aboveTarget} of ${normalizedKpis.totalRisks} on target`, color: SE.green, icon: <TrendingUp size={15} />, isText: true },
+              ].map(card => (
+                <div key={card.label} style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center', minHeight: 68 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 11, display: 'grid', placeItems: 'center', background: `${card.color}22`, border: `1.5px solid ${card.color}55`, color: card.color, flexShrink: 0 }}>{card.icon}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: card.color, fontFamily: 'DM Sans, sans-serif', fontSize: 22, lineHeight: 1, fontWeight: 950 }}>
+                      {card.isText ? card.value : <AnimatedNumber value={Number(card.value)} animationKey={`detail-${selectedWeek}-${card.label}`} />}
+                    </div>
+                    <div style={{ color: palette.text, fontSize: 10, fontWeight: 900, marginTop: 3, textTransform: 'uppercase', letterSpacing: '.04em' }}>{card.label}</div>
+                    <div style={{ color: palette.muted, fontSize: 9.5, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.sub}</div>
+                  </div>
+                </div>
+              ))}
             </div>
           </SectionCard>
 
@@ -1007,8 +1150,51 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
           <SectionCard id="charts-section" title="Professional Risk Analytics Charts" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
 
+            {/* ═══ Transitioned to Outputs Toggle Bar ═══ */}
+            <div className="no-print" style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 10, fontWeight: 900, color: palette.muted, textTransform: 'uppercase', letterSpacing: '.06em', flexShrink: 0, marginRight: 4 }}>Transitioned to Outputs</span>
+              {/* Master toggle */}
+              <button
+                type="button"
+                onClick={toggleAllOutputs}
+                style={{
+                  height: 26, borderRadius: 999, border: `1.5px solid ${allOutputsOn ? SE.teal : palette.border}`,
+                  background: allOutputsOn ? `${SE.teal}22` : palette.cardSolid,
+                  color: allOutputsOn ? SE.teal : palette.muted,
+                  padding: '0 12px', fontSize: 10, fontWeight: 900, cursor: 'pointer', flexShrink: 0,
+                  transition: 'all 180ms ease',
+                }}
+              >
+                {allOutputsOn ? 'Hide All' : 'Show All'}
+              </button>
+              <div style={{ width: 1, height: 18, background: palette.border, flexShrink: 0 }} />
+              {/* Per-panel toggles */}
+              {OUTPUT_PANELS.map(p => {
+                const on = outputsVisible[p.id];
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => toggleOutput(p.id)}
+                    style={{
+                      height: 26, borderRadius: 999,
+                      border: `1.5px solid ${on ? SE.blue : palette.border}`,
+                      background: on ? `${SE.blue}22` : palette.cardSolid,
+                      color: on ? SE.blue : palette.muted,
+                      padding: '0 11px', fontSize: 10, fontWeight: 800, cursor: 'pointer', flexShrink: 0,
+                      transition: 'all 180ms ease',
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                    }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? SE.blue : palette.border, flexShrink: 0 }} />
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Mitigation Plans Progress — full-width multi-week trend */}
-            <div style={{ ...chartBox(palette), marginBottom: 10 }}>
+            {outputsVisible['op-target-vs-actual'] && <div style={{ ...chartBox(palette), marginBottom: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
                 <h3 style={chartTitle(palette)}>Mitigation Plans Progress — Target vs Actual (All Weeks)</h3>
                 {weeklyTargetVsActualData.length > 0 && (() => {
@@ -1071,10 +1257,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.red, borderRadius: 2 }} />Avg Actual %</span>
                 <span style={{ ...legendItem(palette), marginLeft: 'auto', fontSize: 10, color: palette.muted }}>Target = linear ramp (equal progress expected per week)</span>
               </div>
-            </div>
+            </div>}
 
+            {/* Row 1: Donut / Gauge / Heatmap — each individually togglable */}
+            {(outputsVisible['op-category-donut'] || outputsVisible['op-gauge'] || outputsVisible['op-heatmap']) && (
             <div className="professional-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-category-donut'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>1. Risk Category Donut</h3>
                 <div style={{ position: 'relative', height: 210 }}>
                   <ResponsiveContainer width="100%" height={210}>
@@ -1095,21 +1283,23 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}><div style={{ textAlign: 'center' }}><div style={{ color: SE.red, fontSize: 30, fontFamily: 'DM Sans, sans-serif', fontWeight: 950 }}>{categoryTotal}</div><div style={{ color: palette.muted, fontSize: 10, fontWeight: 800 }}>TOTAL RISKS</div></div></div>
                 </div>
                 <div style={legendStyle}>{donutData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.name}</span>)}</div>
-              </div>
+              </div>}
 
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-gauge'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>2. Risk Score Gauge</h3>
                 <ProgressGauge score={kpis.avgRiskScore} palette={palette} />
-              </div>
+              </div>}
 
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-heatmap'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>3. Risk Matrix Heatmap</h3>
-                <RiskHeatmap risks={riskRegister} filterOwner={filterOwner} palette={palette} />
-              </div>
-            </div>
+                <RiskHeatMap risks={riskRegister} palette={palette} isDark={isDark} />
+              </div>}
+            </div>)}
 
+            {/* Row 2: Weekly Movement / Overdue Bar / Progress Status */}
+            {(outputsVisible['op-weekly-movement'] || outputsVisible['op-overdue-bar'] || outputsVisible['op-progress-status']) && (
             <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-weekly-movement'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>4. Weekly Movement Line Chart</h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <LineChart data={weeklyMovementData} margin={{ top: 14, right: 26, left: 0, bottom: 4 }}>
@@ -1124,10 +1314,10 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     <Line yAxisId="right" type="monotone" dataKey="declined" name="Declined Risks" stroke={SE.red} strokeWidth={2.2} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
-              </div>
+              </div>}
 
               {/* Chart 5 — Overdue */}
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-overdue-bar'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>5. Overdue Mitigation Bar Chart</h3>
                 {overdueByOwnerData.length > 0 ? <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={overdueByOwnerData} layout="vertical" margin={{ top: 8, right: 38, left: 4, bottom: 6 }}>
@@ -1138,10 +1328,10 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     <Bar dataKey="overdue" name="Overdue Open Risks" fill={SE.orange} radius={[0, 8, 8, 0]} animationDuration={650} label={{ position: 'right', fontSize: 11, fontWeight: 900, fill: palette.text }} />
                   </BarChart>
                 </ResponsiveContainer> : <div style={{ height: 220, display: 'grid', placeItems: 'center', color: SE.green, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>No overdue open mitigations detected</div>}
-              </div>
+              </div>}
 
               {/* Chart 6 — Risk Progress Status */}
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-progress-status'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>6. Risk Progress Status</h3>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={progressData} margin={{ top: 14, right: 16, left: 0, bottom: 4 }} barCategoryGap="35%">
@@ -1155,6 +1345,84 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   </BarChart>
                 </ResponsiveContainer>
                 <div style={legendStyle}>{progressData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.fullName}</span>)}</div>
+              </div>}
+            </div>)}
+
+            {/* ── Step 3: New Charts Row — Monthly Threat / Radar / L×I Assessment ── */}
+            <div className="professional-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
+
+              {/* Monthly Threat Frequency by Category */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Monthly Threat Frequency by Category</h3>
+                {monthlyThreatData.data.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={monthlyThreatData.data} margin={{ top: 10, right: 10, left: 0, bottom: 4 }} barCategoryGap="25%">
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                      <XAxis dataKey="week" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                      <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                      <Tooltip content={<ChartTooltip palette={palette} />} />
+                      {monthlyThreatData.cats.map(cat => (
+                        <Bar key={cat} dataKey={cat} stackId="a" fill={monthlyThreatData.catColors[cat]} animationDuration={650} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: 220, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No category data</div>
+                )}
+                <div style={legendStyle}>
+                  {monthlyThreatData.cats.map(cat => (
+                    <span key={cat} style={legendItem(palette)}>
+                      <span style={{ width: 9, height: 9, borderRadius: 3, background: monthlyThreatData.catColors[cat] }} />
+                      {cat.length > 16 ? cat.slice(0, 16) + '…' : cat}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Risk Score Radar by Category */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Risk Score Radar by Category</h3>
+                {radarData.length >= 3 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <RadarChart cx="50%" cy="50%" outerRadius="72%" data={radarData}>
+                      <PolarGrid stroke={palette.chartGrid} />
+                      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} />
+                      <PolarRadiusAxis angle={30} domain={[0, 25]} tick={{ fontSize: 8, fill: palette.muted }} />
+                      <Radar name="Avg Score" dataKey="avgScore" stroke={SE.blue} fill={SE.blue} fillOpacity={0.28} strokeWidth={2} />
+                      <Tooltip content={<ChartTooltip palette={palette} />} />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: 220, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>Need ≥3 categories</div>
+                )}
+                <div style={legendStyle}>
+                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.blue }} />Avg Risk Score</span>
+                </div>
+              </div>
+
+              {/* L×I Assessment Status Stacked Bar */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>L×I Assessment Status</h3>
+                {liAssessmentData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={liAssessmentData} layout="vertical" margin={{ top: 4, right: 20, left: 10, bottom: 4 }} barCategoryGap="20%">
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+                      <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                      <YAxis type="category" dataKey="key" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={52} axisLine={false} tickLine={false} />
+                      <Tooltip content={<ChartTooltip palette={palette} />} />
+                      <Bar dataKey="notStarted" name="Not Started" stackId="s" fill={SE.red} animationDuration={650} />
+                      <Bar dataKey="inProgress" name="In Progress" stackId="s" fill={SE.gold} animationDuration={650} />
+                      <Bar dataKey="completed" name="Completed" stackId="s" fill={SE.green} radius={[0, 4, 4, 0]} animationDuration={650} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: 220, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No L/I data</div>
+                )}
+                <div style={legendStyle}>
+                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.red }} />Not Started</span>
+                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.gold }} />In Progress</span>
+                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.green }} />Completed</span>
+                </div>
               </div>
             </div>
 
@@ -1258,9 +1526,10 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             )}
 
             {/* Row 3: Chart 7 + Mitigation Progress Detail */}
+            {(outputsVisible['op-owner-chart'] || outputsVisible['op-mitigation-detail']) && (
             <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
               {/* Chart 7 */}
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-owner-chart'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>7. Risks by Owner</h3>
                 <ResponsiveContainer width="100%" height={Math.max(260, ownerHighRiskData.length * 38)}>
                   <BarChart
@@ -1307,13 +1576,70 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   </BarChart>
                 </ResponsiveContainer>
                 <div style={legendStyle}>{[[SE.blue, 'Risk Count'], [SE.green, 'Avg Progress ≥80%'], [SE.gold, '50–79%'], [SE.red, '<50%']].map(([c, l]) => <span key={l} style={legendItem(palette)}><span style={{ width: 12, height: 7, background: c, borderRadius: 2 }} />{l}</span>)}</div>
-              </div>
+              </div>}
 
-
-              <div style={chartBox(palette)}>
+              {outputsVisible['op-mitigation-detail'] && <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>Mitigation Pipeline Funnel — {selectedWeek || period}</h3>
                 <MitigationFunnelChart data={funnelData} palette={palette} />
-              </div>
+              </div>}
+            </div>)}
+          </SectionCard>
+
+          {/* ═══ Step 4: Compact KPI Strip + Horizontal Pipeline Funnel ═══ */}
+          <SectionCard id="pipeline-section" title="Mitigation Pipeline Overview" palette={palette} compact open={sectionOpen['pipeline-section'] ?? true} onOpenChange={open => setSingleSectionOpen('pipeline-section', open)}>
+            {/* Compact KPI strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
+              {funnelData.map((stage, i) => {
+                const stageColors = [SE.blue, SE.teal, SE.gold, SE.orange, SE.green];
+                const c = stageColors[i] || SE.blue;
+                return (
+                  <div key={stage.label} style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 12, padding: '10px 14px', textAlign: 'center' }}>
+                    <div style={{ color: c, fontFamily: 'DM Sans, sans-serif', fontSize: 26, fontWeight: 950, lineHeight: 1 }}>{stage.count}</div>
+                    <div style={{ color: palette.text, fontSize: 10, fontWeight: 900, marginTop: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{stage.label}</div>
+                    <div style={{ color: palette.muted, fontSize: 10, marginTop: 2 }}>{stage.pct}% of total</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Horizontal pipeline bar */}
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, borderRadius: 12, overflow: 'hidden', height: 52, marginBottom: 8 }}>
+              {funnelData.map((stage, i) => {
+                const stageColors = [SE.blue, SE.teal, SE.gold, SE.orange, SE.green];
+                const c = stageColors[i] || SE.blue;
+                const widthPct = funnelData[0].count > 0 ? Math.max(4, (stage.count / funnelData[0].count) * 100) : 20;
+                return (
+                  <div
+                    key={stage.label}
+                    title={`${stage.label}: ${stage.count} (${stage.pct}%)`}
+                    style={{
+                      flex: `0 0 ${widthPct}%`,
+                      background: c,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white',
+                      fontSize: 11,
+                      fontWeight: 900,
+                      borderRight: i < funnelData.length - 1 ? '2px solid rgba(255,255,255,0.3)' : 'none',
+                      transition: 'flex 0.4s ease',
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span style={{ fontSize: 16, fontFamily: 'DM Sans, sans-serif', fontWeight: 950 }}>{stage.count}</span>
+                    <span style={{ fontSize: 9, opacity: 0.88 }}>{stage.pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={legendStyle}>
+              {funnelData.map((stage, i) => {
+                const stageColors = [SE.blue, SE.teal, SE.gold, SE.orange, SE.green];
+                return <span key={stage.label} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: stageColors[i] }} />{stage.label}</span>;
+              })}
             </div>
           </SectionCard>
 
@@ -1335,7 +1661,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: palette.muted, fontWeight: 900 }}><span style={pillCircle('#95A5A6')}>{changesSummary.noChange}</span>No Change</span>
             </div>
 
-            <div id="risk-table-wrapper" style={{ overflow: 'auto', maxHeight: 470, borderRadius: 14, border: `1px solid ${palette.border}` }}>
+            <div id="risk-table-wrapper" style={{ overflow: 'auto', maxHeight: 470, borderRadius: 14, border: `1px solid ${palette.border}`, marginBottom: activeRisk ? 14 : 0 }}>
               <table className="risk-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 11 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
                   <tr style={{ background: palette.tableHead, color: 'white' }}>
@@ -1361,6 +1687,211 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                         <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900 }}>{row.beforePct > 0 ? `${row.beforePct}%` : '–'}</td>
                         <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}><ChangeIndicator dev={row.developmentPct} /></td>
                       </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* ── Selected Risk Detail (inline, below the table) ─────── */}
+            {activeRisk && (
+              <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 14 }}>
+                {/* Sub-header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <ScoreBadge score={activeRisk.score} />
+                  <span style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: 13, color: palette.text }}>{activeRisk.title}</span>
+                  <span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 900, fontSize: 11, marginLeft: 4 }}>{activeRisk.rating}</span>
+                  <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span>
+                  <SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'Risk_Selected_Detail.png', bgForExport)}>
+                    <ImageDown size={12} />PNG
+                  </SmallActionButton>
+                </div>
+                <div ref={selectedRef} className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 14, alignItems: 'start' }}>
+                  <div style={chartBox(palette)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><ScoreBadge score={activeRisk.score} /><span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 950, fontSize: 12 }}>{activeRisk.rating}</span><span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span></div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={selectedChartData} margin={{ top: 18, right: 20, left: 0, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: palette.text }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                        <YAxis tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
+                        <Tooltip content={<ChartTooltip palette={palette} />} />
+                        <Bar dataKey="value" name="Value" radius={[8, 8, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: palette.text, formatter: (v: number) => v > 0 ? `${v}%` : 'No Change' }}>
+                          {selectedChartData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 16, padding: 14, color: palette.text }}>
+                    <h3 style={{ margin: 0, fontFamily: 'DM Sans, sans-serif', fontSize: 14, fontWeight: 950, color: palette.text }}>Mitigation Plan</h3>
+                    <p style={{ whiteSpace: 'pre-line', fontSize: 12, lineHeight: 1.6, color: palette.muted, marginTop: 8 }}>{activeRisk.mitigation || 'No mitigation details available.'}</p>
+                    <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                      <div style={miniMetric(palette)}><span>Owner</span><strong>{activeRisk.owner || '–'}</strong></div>
+                      <div style={miniMetric(palette)}><span>Closing Date</span><strong>{activeRisk.closingDate || '–'}</strong></div>
+                      <div style={miniMetric(palette)}><span>Status</span><strong>{activeRisk.progressStatus || '–'}</strong></div>
+                    </div>
+                    {weeks?.length > 1 && <div style={{ marginTop: 12, padding: 10, borderRadius: 12, background: palette.cardSolid, border: `1px solid ${palette.border}` }}>
+                      <div style={{ fontSize: 10, color: palette.muted, marginBottom: 6, fontWeight: 900 }}>Progress trend across all weeks</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto' }}>{weeks.map((w, i) => {
+                        const val = Math.round((activeRisk.weekProgress[w.label] ?? 0) * 100);
+                        const prev = i > 0 ? Math.round((activeRisk.weekProgress[weeks[i - 1].label] ?? 0) * 100) : val;
+                        const color = val > prev ? SE.green : val < prev ? SE.red : palette.muted;
+                        const isSelected = w.label === selectedWeek;
+                        const isPrev = w.label === prevWeekLabel;
+                        return <div key={w.label} style={{ minWidth: 72, textAlign: 'center', padding: '6px 7px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : isPrev ? 'rgba(243,156,18,.12)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : isPrev ? `1px solid ${SE.gold}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 13, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div>{isSelected && <div style={{ fontSize: 7, color: SE.blue, fontWeight: 900, marginTop: 1 }}>CURRENT</div>}{isPrev && !isSelected && <div style={{ fontSize: 7, color: SE.gold, fontWeight: 900, marginTop: 1 }}>PREVIOUS</div>}</div>;
+                      })}</div>
+                    </div>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* ═══ Steps 5 & 6: Tabbed Risk Log with Expandable Rows + Add Note ═══ */}
+          <SectionCard id="risk-log-section" title="Risk Log" palette={palette} compact open={sectionOpen['risk-log-section'] ?? true} onOpenChange={open => setSingleSectionOpen('risk-log-section', open)}>
+            {/* Tab bar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              {(['all', 'high', 'overdue', 'search'] as const).map(tab => {
+                const labels: Record<string, string> = { all: 'All Risks', high: 'High Priority', overdue: 'Overdue Actions', search: 'Search Result' };
+                const counts: Record<string, number> = {
+                  all: riskRegister.length,
+                  high: riskRegister.filter(r => r.score >= 15 || /high/i.test(r.rating)).length,
+                  overdue: riskRegister.filter(r => r.isOverdue).length,
+                  search: riskLogFiltered.length,
+                };
+                const isActive = riskLogTab === tab;
+                return (
+                  <button key={tab} type="button" onClick={() => setRiskLogTab(tab)}
+                    style={{
+                      height: 30, borderRadius: 999, padding: '0 14px', fontSize: 10, fontWeight: 900, cursor: 'pointer',
+                      border: isActive ? 'none' : `1px solid ${palette.border}`,
+                      background: isActive ? SE.blue : palette.cardSolid,
+                      color: isActive ? 'white' : palette.text,
+                      transition: 'all 150ms ease',
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    {labels[tab]}
+                    <span style={{ background: isActive ? 'rgba(255,255,255,0.25)' : palette.cardSoft, borderRadius: 999, padding: '1px 7px', fontSize: 9, fontWeight: 900 }}>{counts[tab]}</span>
+                  </button>
+                );
+              })}
+              {/* Search input shown always */}
+              <div style={{ position: 'relative', marginLeft: 'auto' }}>
+                <Search size={12} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: palette.muted, pointerEvents: 'none' }} />
+                <input
+                  value={riskLogSearch}
+                  onChange={e => { setRiskLogSearch(e.target.value); if (e.target.value) setRiskLogTab('search'); }}
+                  placeholder="Search risks…"
+                  style={{ ...inputStyle, paddingLeft: 30, width: 200 }}
+                />
+              </div>
+            </div>
+
+            {/* Risk log table */}
+            <div style={{ border: `1px solid ${palette.border}`, borderRadius: 12, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead>
+                  <tr style={{ background: palette.tableHead, color: 'white' }}>
+                    <th style={{ width: 32, padding: '8px 10px' }} />
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>ID</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Risk Title</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Severity</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Category</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Owner</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Next Action</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Progress</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {riskLogFiltered.length === 0 ? (
+                    <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: palette.muted, background: palette.cardSolid }}>No risks found.</td></tr>
+                  ) : riskLogFiltered.map((r, i) => {
+                    const isExpanded = expandedRiskId === r.id;
+                    const ratingColor = getRatingColor(r.rating);
+                    return (
+                      <>
+                        <tr key={r.id} style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid, cursor: 'pointer' }}
+                          onClick={() => setExpandedRiskId(isExpanded ? null : r.id)}>
+                          <td style={{ padding: '8px 10px', textAlign: 'center', color: palette.muted }}>
+                            {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                          </td>
+                          <td style={{ padding: '8px 10px', color: palette.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{r.id}</td>
+                          <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 700, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</td>
+                          <td style={{ padding: '8px 10px' }}>
+                            <span style={{ background: `${ratingColor}22`, color: ratingColor, border: `1px solid ${ratingColor}55`, borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 900, whiteSpace: 'nowrap' }}>{r.rating}</span>
+                          </td>
+                          <td style={{ padding: '8px 10px', color: palette.muted, fontSize: 10 }}>{r.category || '–'}</td>
+                          <td style={{ padding: '8px 10px', color: palette.text, fontSize: 10 }}>{r.owner || '–'}</td>
+                          <td style={{ padding: '8px 10px', color: palette.muted, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.mitigation}>{r.mitigation || '–'}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                              <div style={{ width: 60, height: 6, background: palette.cardSoft, borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ width: `${r.currentPct}%`, height: '100%', background: r.currentPct >= 100 ? SE.green : r.currentPct >= 50 ? SE.gold : SE.red, borderRadius: 3 }} />
+                              </div>
+                              <span style={{ fontSize: 10, fontWeight: 900, color: r.currentPct >= 100 ? SE.green : r.currentPct >= 50 ? SE.gold : SE.red }}>{r.currentPct}%</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                            {riskNotes[r.id] ? (
+                              <span style={{ fontSize: 9, color: SE.teal, fontWeight: 700, background: `${SE.teal}18`, borderRadius: 999, padding: '2px 7px' }}>Note</span>
+                            ) : (
+                              <span style={{ fontSize: 9, color: palette.muted }}>+</span>
+                            )}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr key={`${r.id}-detail`} style={{ background: isDark ? 'rgba(0,120,255,0.06)' : 'rgba(37,99,235,0.04)' }}>
+                            <td colSpan={9} style={{ padding: '12px 18px 14px' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                                {/* Left: details */}
+                                <div>
+                                  <div style={{ fontSize: 10, fontWeight: 900, color: palette.muted, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Risk Details</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                                    {[
+                                      { label: 'Score', value: r.score },
+                                      { label: 'Likelihood', value: r.likelihood },
+                                      { label: 'Impact', value: r.impact },
+                                      { label: 'Closing Date', value: r.closingDate || '–' },
+                                      { label: 'Status', value: r.progressStatus || '–' },
+                                      { label: 'Sub-Category', value: r.subCategory || '–' },
+                                    ].map(m => (
+                                      <div key={m.label} style={{ background: palette.cardSolid, borderRadius: 8, padding: '6px 10px' }}>
+                                        <div style={{ fontSize: 9, color: palette.muted, fontWeight: 700 }}>{m.label}</div>
+                                        <div style={{ fontSize: 12, color: palette.text, fontWeight: 900, marginTop: 2 }}>{m.value}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                {/* Middle: mitigation */}
+                                <div>
+                                  <div style={{ fontSize: 10, fontWeight: 900, color: palette.muted, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Mitigation Plan</div>
+                                  <div style={{ background: palette.cardSolid, borderRadius: 8, padding: '8px 10px', fontSize: 11, color: palette.text, lineHeight: 1.6, maxHeight: 120, overflowY: 'auto' }}>{r.mitigation || 'No mitigation details.'}</div>
+                                </div>
+                                {/* Right: Add Note */}
+                                <div>
+                                  <div style={{ fontSize: 10, fontWeight: 900, color: palette.muted, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Add Note</div>
+                                  {riskNotes[r.id] && (
+                                    <div style={{ background: `${SE.teal}14`, border: `1px solid ${SE.teal}44`, borderRadius: 8, padding: '6px 10px', fontSize: 11, color: palette.text, marginBottom: 6, lineHeight: 1.5 }}>{riskNotes[r.id]}</div>
+                                  )}
+                                  <textarea
+                                    value={noteInput[r.id] || ''}
+                                    onChange={e => setNoteInput(prev => ({ ...prev, [r.id]: e.target.value }))}
+                                    placeholder="Type a note…"
+                                    rows={3}
+                                    style={{ width: '100%', background: palette.cardSolid, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '7px 10px', color: palette.text, fontSize: 11, fontFamily: 'Inter, sans-serif', resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); if (noteInput[r.id]?.trim()) { setRiskNotes(prev => ({ ...prev, [r.id]: noteInput[r.id] })); setNoteInput(prev => ({ ...prev, [r.id]: '' })); } }}
+                                    style={{ marginTop: 6, height: 28, borderRadius: 999, background: SE.teal, border: 'none', color: 'white', fontSize: 10, fontWeight: 900, padding: '0 14px', cursor: 'pointer' }}
+                                  >Save Note</button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     );
                   })}
                 </tbody>
@@ -1527,44 +2058,310 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             )}
           </SectionCard>
 
-          {activeRisk && <SectionCard id="selected-risk-section" title={`Selected Risk Detail — ${activeRisk.title}`} palette={palette} bodyRef={selectedRef} open={sectionOpen['selected-risk-section']} onOpenChange={open => setSingleSectionOpen('selected-risk-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(selectedRef, 'Risk_Selected_Detail.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
-            <div className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 14, alignItems: 'start' }}>
-              <div style={chartBox(palette)}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><ScoreBadge score={activeRisk.score} /><span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 950, fontSize: 12 }}>{activeRisk.rating}</span><span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span></div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={selectedChartData} margin={{ top: 18, right: 20, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: palette.text }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="value" name="Value" radius={[8, 8, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: palette.text, formatter: (v: number) => v > 0 ? `${v}%` : 'No Change' }}>
-                      {selectedChartData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+          {/* ── Section 6: Overdue Action Alert Center ─────────────────────────── */}
+          <SectionCard id="overdue-section" title="Overdue Action Alert Center" palette={palette} bodyRef={overdueRef} open={sectionOpen['overdue-section']} onOpenChange={open => setSingleSectionOpen('overdue-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(overdueRef, 'Overdue_Actions.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+            <div ref={overdueRef}>
+              {/* Alert banner */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: overdueActions?.count > 0 ? 'rgba(192,57,43,.12)' : 'rgba(39,174,96,.10)', border: `1px solid ${overdueActions?.count > 0 ? SE.red : SE.green}`, borderRadius: 12, padding: '10px 16px', marginBottom: 12 }}>
+                <AlertTriangle size={18} color={overdueActions?.count > 0 ? SE.red : SE.green} />
+                <span style={{ fontWeight: 900, fontSize: 13, color: overdueActions?.count > 0 ? SE.red : SE.green }}>
+                  {overdueActions?.count > 0 ? `${overdueActions.count} overdue action${overdueActions.count > 1 ? 's' : ''} require immediate attention` : 'All actions are on schedule'}
+                </span>
               </div>
-              <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 16, padding: 14, color: palette.text }}>
-                <h3 style={{ margin: 0, fontFamily: 'DM Sans, sans-serif', fontSize: 14, fontWeight: 950, color: palette.text }}>Mitigation Plan</h3>
-                <p style={{ whiteSpace: 'pre-line', fontSize: 12, lineHeight: 1.6, color: palette.muted, marginTop: 8 }}>{activeRisk.mitigation || 'No mitigation details available.'}</p>
-                <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                  <div style={miniMetric(palette)}><span>Owner</span><strong>{activeRisk.owner || '–'}</strong></div>
-                  <div style={miniMetric(palette)}><span>Closing Date</span><strong>{activeRisk.closingDate || '–'}</strong></div>
-                  <div style={miniMetric(palette)}><span>Status</span><strong>{activeRisk.progressStatus || '–'}</strong></div>
+              {overdueActions?.items?.length > 0 ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead>
+                      <tr style={{ background: palette.tableHead }}>
+                        {['#', 'Risk Title', 'Owner', 'Closing Date', 'Status', 'Progress'].map(h => (
+                          <th key={h} style={{ padding: '8px 10px', color: '#fff', fontWeight: 900, textAlign: 'left', whiteSpace: 'nowrap', fontSize: 10 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {overdueActions.items.map((item, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}` }}>
+                          <td style={{ padding: '8px 10px', color: SE.red, fontWeight: 900 }}>{i + 1}</td>
+                          <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 800 }}>{item.riskTitle}</td>
+                          <td style={{ padding: '8px 10px', color: SE.cyan }}>{item.owner}</td>
+                          <td style={{ padding: '8px 10px', color: SE.orange, fontWeight: 800 }}>{item.closingDate}</td>
+                          <td style={{ padding: '8px 10px' }}>
+                            <span style={{ background: item.progressStatus?.toLowerCase().includes('not') ? 'rgba(192,57,43,.15)' : 'rgba(230,126,34,.15)', color: item.progressStatus?.toLowerCase().includes('not') ? SE.red : SE.orange, border: `1px solid ${item.progressStatus?.toLowerCase().includes('not') ? SE.red : SE.orange}`, borderRadius: 6, padding: '2px 8px', fontWeight: 800, fontSize: 10 }}>{item.progressStatus}</span>
+                          </td>
+                          <td style={{ padding: '8px 10px', minWidth: 120 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ flex: 1, height: 6, background: palette.border, borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ width: `${item.currentPct}%`, height: '100%', background: item.currentPct >= 80 ? SE.green : item.currentPct >= 50 ? SE.gold : SE.red, borderRadius: 3, transition: 'width 0.6s ease' }} />
+                              </div>
+                              <span style={{ fontSize: 10, fontWeight: 800, color: palette.muted, minWidth: 28 }}>{item.currentPct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                {weeks?.length > 1 && <div style={{ marginTop: 12, padding: 10, borderRadius: 12, background: palette.cardSolid, border: `1px solid ${palette.border}` }}>
-                  <div style={{ fontSize: 10, color: palette.muted, marginBottom: 6, fontWeight: 900 }}>Progress trend across all weeks</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto' }}>{weeks.map((w, i) => {
-                    const val = Math.round((activeRisk.weekProgress[w.label] ?? 0) * 100);
-                    const prev = i > 0 ? Math.round((activeRisk.weekProgress[weeks[i - 1].label] ?? 0) * 100) : val;
-                    const color = val > prev ? SE.green : val < prev ? SE.red : palette.muted;
-                    const isSelected = w.label === selectedWeek;
-                    const isPrev = w.label === prevWeekLabel;
-                    return <div key={w.label} style={{ minWidth: 72, textAlign: 'center', padding: '6px 7px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : isPrev ? 'rgba(243,156,18,.12)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : isPrev ? `1px solid ${SE.gold}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 13, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div>{isSelected && <div style={{ fontSize: 7, color: SE.blue, fontWeight: 900, marginTop: 1 }}>CURRENT</div>}{isPrev && !isSelected && <div style={{ fontSize: 7, color: SE.gold, fontWeight: 900, marginTop: 1 }}>PREVIOUS</div>}</div>;
-                  })}</div>
-                </div>}
+              ) : (
+                <div style={{ textAlign: 'center', padding: '30px 0', color: SE.green, fontWeight: 800, fontSize: 13 }}>No overdue actions found</div>
+              )}
+            </div>
+          </SectionCard>
+
+          {/* ── Section 7: KRI Tracking Panel ────────────────────────────────────── */}
+          <SectionCard id="kri-section" title="Key Risk Indicator (KRI) Tracking" palette={palette} bodyRef={kriRef} open={sectionOpen['kri-section']} onOpenChange={open => setSingleSectionOpen('kri-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kriRef, 'KRI_Tracking.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+            <div ref={kriRef}>
+              {/* KPI summary row */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                {(['on-track', 'at-risk', 'breached'] as const).map(s => {
+                  const count = kriData?.items?.filter(k => k.status === s).length ?? 0;
+                  const color = s === 'on-track' ? SE.green : s === 'at-risk' ? SE.gold : SE.red;
+                  const label = s === 'on-track' ? 'On Track' : s === 'at-risk' ? 'At Risk' : 'Breached';
+                  return (
+                    <div key={s} style={{ flex: '1 1 100px', background: palette.cardSoft, border: `1px solid ${color}`, borderRadius: 12, padding: '10px 14px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: 26, fontWeight: 950, color, fontFamily: 'DM Sans, sans-serif' }}>{count}</span>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: palette.muted }}>{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* KRI table */}
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ background: palette.tableHead }}>
+                      {['Risk Title', 'KRI Name', 'Measure', 'Unit', 'Target', 'Actual', 'Status'].map(h => (
+                        <th key={h} style={{ padding: '8px 10px', color: '#fff', fontWeight: 900, textAlign: 'left', whiteSpace: 'nowrap', fontSize: 10 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(kriData?.items ?? []).map((item, i) => {
+                      const color = item.status === 'on-track' ? SE.green : item.status === 'at-risk' ? SE.gold : SE.red;
+                      const label = item.status === 'on-track' ? 'On Track' : item.status === 'at-risk' ? 'At Risk' : 'Breached';
+                      return (
+                        <tr key={i} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}` }}>
+                          <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 800, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.riskTitle}</td>
+                          <td style={{ padding: '8px 10px', color: SE.cyan }}>{item.kriName}</td>
+                          <td style={{ padding: '8px 10px', color: palette.muted }}>{item.kriMeasure}</td>
+                          <td style={{ padding: '8px 10px', color: palette.muted, textAlign: 'center' }}>{item.kriUnit}</td>
+                          <td style={{ padding: '8px 10px', color: SE.blue, fontWeight: 800, textAlign: 'right' }}>{item.kriTarget}</td>
+                          <td style={{ padding: '8px 10px', color, fontWeight: 900, textAlign: 'right' }}>{item.kriActual}</td>
+                          <td style={{ padding: '8px 10px' }}>
+                            <span style={{ background: `${color}22`, color, border: `1px solid ${color}`, borderRadius: 6, padding: '2px 8px', fontWeight: 800, fontSize: 10 }}>{label}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
-          </SectionCard>}
+          </SectionCard>
+
+          {/* ── Section 9: Inherent → Residual → Target Velocity ─────────────────── */}
+          <SectionCard id="velocity-section" title="Risk Score Velocity — Inherent vs Residual vs Target" palette={palette} bodyRef={velocityRef} open={sectionOpen['velocity-section']} onOpenChange={open => setSingleSectionOpen('velocity-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(velocityRef, 'Risk_Velocity.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+            <div ref={velocityRef}>
+              <RiskVelocityChart data={{
+                items: [...riskRegister]
+                  .filter(r => r.score > 0)
+                  .sort((a, b) => b.score - a.score)
+                  .map(r => ({ title: r.title, inherent: r.score, residual: r.residualScore ?? 0, target: r.tScore ?? 0, gap: (r.residualScore ?? 0) - (r.tScore ?? 0), rating: r.rating })),
+                avgInherent: riskRegister.length > 0 ? Math.round(riskRegister.filter(r=>r.score>0).reduce((a,b)=>a+b.score,0)/(riskRegister.filter(r=>r.score>0).length||1)*10)/10 : 0,
+                avgResidual: riskRegister.length > 0 ? Math.round(riskRegister.filter(r=>r.score>0).reduce((a,b)=>a+(b.residualScore??0),0)/(riskRegister.filter(r=>r.score>0).length||1)*10)/10 : 0,
+                avgTarget:   riskRegister.length > 0 ? Math.round(riskRegister.filter(r=>(r.tScore??0)>0).reduce((a,b)=>a+(b.tScore??0),0)/(riskRegister.filter(r=>(r.tScore??0)>0).length||1)*10)/10 : 0,
+              }} palette={palette} />
+            </div>
+          </SectionCard>
+
+          {/* ── Section 10: Risk Taxonomy ────────────────────────────────────────── */}
+          <SectionCard id="taxonomy-section" title="Risk Taxonomy — Category Breakdown" palette={palette} bodyRef={taxonomyRef} open={sectionOpen['taxonomy-section']} onOpenChange={open => setSingleSectionOpen('taxonomy-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(taxonomyRef, 'Risk_Taxonomy.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+            <div ref={taxonomyRef}>
+              <RiskTaxonomyChart data={(() => {
+                const catMap = new Map<string, Map<string, number>>();
+                riskRegister.forEach(r => {
+                  const cat = (r as any).category || 'Uncategorised';
+                  const sub = (r as any).subCategory || 'Other';
+                  if (!catMap.has(cat)) catMap.set(cat, new Map());
+                  const sm = catMap.get(cat)!;
+                  sm.set(sub, (sm.get(sub) ?? 0) + 1);
+                });
+                const categories = Array.from(catMap.entries())
+                  .map(([name, sm]) => ({ name, count: Array.from(sm.values()).reduce((a,b)=>a+b,0), subCategories: Array.from(sm.entries()).map(([sn,sc])=>({name:sn,count:sc})) }))
+                  .sort((a,b)=>b.count-a.count);
+                const rtMap = new Map<string, number>();
+                riskRegister.forEach(r => { const t=(r as any).riskType||'Unknown'; rtMap.set(t,(rtMap.get(t)??0)+1); });
+                const riskTypes = Array.from(rtMap.entries()).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+                return { categories, riskTypes };
+              })()} palette={palette} />
+            </div>
+          </SectionCard>
+
+          {/* ═══ Step 8: Bottom 4-Tab Risk Register ═══ */}
+          <SectionCard id="bottom-register-section" title="Risk Register Summary" palette={palette} compact open={sectionOpen['bottom-register-section'] ?? true} onOpenChange={open => setSingleSectionOpen('bottom-register-section', open)}>
+            {/* Tab bar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              {(['all', 'high', 'overdue', 'search'] as const).map(tab => {
+                const labels: Record<string, string> = { all: 'All Risks', high: 'High Priority', overdue: 'Overdue Actions', search: 'Search Result' };
+                const counts: Record<string, number> = {
+                  all: riskRegister.length,
+                  high: riskRegister.filter(r => r.score >= 15 || /high/i.test(r.rating)).length,
+                  overdue: riskRegister.filter(r => r.isOverdue).length,
+                  search: riskRegister.filter(r => normalise(`${r.title} ${r.owner} ${r.category}`).includes(normalise(bottomSearch))).length,
+                };
+                const isActive = bottomTab === tab;
+                return (
+                  <button key={tab} type="button" onClick={() => setBottomTab(tab)}
+                    style={{
+                      height: 30, borderRadius: 999, padding: '0 14px', fontSize: 10, fontWeight: 900, cursor: 'pointer',
+                      border: isActive ? 'none' : `1px solid ${palette.border}`,
+                      background: isActive ? SE.blue : palette.cardSolid,
+                      color: isActive ? 'white' : palette.text,
+                      transition: 'all 150ms ease',
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    {labels[tab]}
+                    <span style={{ background: isActive ? 'rgba(255,255,255,0.25)' : palette.cardSoft, borderRadius: 999, padding: '1px 7px', fontSize: 9, fontWeight: 900 }}>{counts[tab]}</span>
+                  </button>
+                );
+              })}
+              <div style={{ position: 'relative', marginLeft: 'auto' }}>
+                <Search size={12} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: palette.muted, pointerEvents: 'none' }} />
+                <input value={bottomSearch} onChange={e => { setBottomSearch(e.target.value); if (e.target.value) setBottomTab('search'); }}
+                  placeholder="Search risks…" style={{ ...inputStyle, paddingLeft: 30, width: 200 }} />
+              </div>
+            </div>
+
+            {/* Compact table */}
+            <div style={{ border: `1px solid ${palette.border}`, borderRadius: 12, overflow: 'hidden', maxHeight: 400, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                  <tr style={{ background: palette.tableHead, color: 'white' }}>
+                    {['#', 'Risk Title', 'Severity', 'Category', 'Owner', 'Next Action', 'Progress', 'Add Note'].map(h => (
+                      <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Progress' || h === 'Add Note' || h === '#' ? 'center' : 'left', fontWeight: 900, fontSize: 10, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const q = normalise(bottomSearch);
+                    const rows = riskRegister.filter(r => {
+                      if (bottomTab === 'high') return r.score >= 15 || /high/i.test(r.rating);
+                      if (bottomTab === 'overdue') return r.isOverdue;
+                      if (bottomTab === 'search') return q ? normalise(`${r.title} ${r.owner} ${r.category}`).includes(q) : true;
+                      return true;
+                    });
+                    if (rows.length === 0) return <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: palette.muted, background: palette.cardSolid }}>No risks found.</td></tr>;
+                    return rows.map((r, i) => {
+                      const rc = getRatingColor(r.rating);
+                      return (
+                        <tr key={r.id} style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid }}>
+                          <td style={{ padding: '7px 10px', textAlign: 'center', color: palette.muted, fontSize: 10 }}>{i + 1}</td>
+                          <td style={{ padding: '7px 10px', color: palette.text, fontWeight: 700, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</td>
+                          <td style={{ padding: '7px 10px' }}>
+                            <span style={{ background: `${rc}22`, color: rc, border: `1px solid ${rc}55`, borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 900 }}>{r.rating}</span>
+                          </td>
+                          <td style={{ padding: '7px 10px', color: palette.muted, fontSize: 10 }}>{r.category || '–'}</td>
+                          <td style={{ padding: '7px 10px', color: palette.text, fontSize: 10 }}>{r.owner || '–'}</td>
+                          <td style={{ padding: '7px 10px', color: palette.muted, fontSize: 10, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.mitigation}>{r.mitigation || '–'}</td>
+                          <td style={{ padding: '7px 10px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'center' }}>
+                              <div style={{ width: 55, height: 5, background: palette.cardSoft, borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ width: `${r.currentPct}%`, height: '100%', background: r.currentPct >= 100 ? SE.green : r.currentPct >= 50 ? SE.gold : SE.red, borderRadius: 3 }} />
+                              </div>
+                              <span style={{ fontSize: 10, fontWeight: 900, color: r.currentPct >= 100 ? SE.green : r.currentPct >= 50 ? SE.gold : SE.red }}>{r.currentPct}%</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '7px 10px', textAlign: 'center' }}>
+                            <button type="button"
+                              onClick={() => { setExpandedRiskId(r.id); setRiskLogTab('all'); document.getElementById('risk-log-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
+                              style={{ height: 24, borderRadius: 999, background: SE.teal, border: 'none', color: 'white', fontSize: 9, fontWeight: 900, padding: '0 10px', cursor: 'pointer' }}
+                            >Add Note</button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+
+          {/* ═══ Step 9: Sparkline Progression Row ═══ */}
+          {sparklineRisks.length > 0 && weeks.length > 1 && (
+          <SectionCard id="sparkline-section" title="Progression of Risk Change" palette={palette} compact open={sectionOpen['sparkline-section'] ?? true} onOpenChange={open => setSingleSectionOpen('sparkline-section', open)}>
+            {/* Summary strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
+              {[
+                { label: 'Total Risks', value: riskRegister.length, color: SE.blue },
+                { label: 'High Priority', value: riskRegister.filter(r => r.score >= 15 || /high/i.test(r.rating)).length, color: SE.red },
+                { label: 'Overdue Actions', value: riskRegister.filter(r => r.isOverdue).length, color: SE.orange },
+                { label: 'Search Result', value: riskRegister.length, color: SE.teal },
+              ].map(m => (
+                <div key={m.label} style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 12, padding: '10px 14px', textAlign: 'center' }}>
+                  <div style={{ color: m.color, fontFamily: 'DM Sans, sans-serif', fontSize: 24, fontWeight: 950, lineHeight: 1 }}>{m.value}</div>
+                  <div style={{ color: palette.text, fontSize: 10, fontWeight: 900, marginTop: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{m.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Sparkline table */}
+            <div style={{ border: `1px solid ${palette.border}`, borderRadius: 12, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead>
+                  <tr style={{ background: palette.tableHead, color: 'white' }}>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Risk Title</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Rating</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Score</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Current %</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Progression Trend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sparklineRisks.map((r, i) => {
+                    const rc = getRatingColor(r.rating);
+                    const maxV = Math.max(100, ...r.sparkData.map(d => d.v));
+                    const sparkW = 160;
+                    const sparkH = 32;
+                    const pts = r.sparkData.map((d, j) => {
+                      const x = sparkW * (j / Math.max(1, r.sparkData.length - 1));
+                      const y = sparkH - (d.v / maxV) * (sparkH - 4) - 2;
+                      return `${x},${y}`;
+                    }).join(' ');
+                    const lastV = r.sparkData[r.sparkData.length - 1]?.v ?? 0;
+                    const firstV = r.sparkData[0]?.v ?? 0;
+                    const trend = lastV > firstV ? SE.green : lastV < firstV ? SE.red : palette.muted;
+                    return (
+                      <tr key={r.id} style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid }}>
+                        <td style={{ padding: '8px 12px', color: palette.text, fontWeight: 700, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                          <span style={{ background: `${rc}22`, color: rc, border: `1px solid ${rc}55`, borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 900 }}>{r.rating}</span>
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, color: getScoreColor(r.score) }}>{r.score}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, color: r.currentPct >= 100 ? SE.green : r.currentPct >= 50 ? SE.gold : SE.red }}>{r.currentPct}%</td>
+                        <td style={{ padding: '8px 10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <svg width={sparkW} height={sparkH} viewBox={`0 0 ${sparkW} ${sparkH}`} style={{ overflow: 'visible' }}>
+                              <polyline points={pts} fill="none" stroke={trend} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                              {r.sparkData.map((d, j) => {
+                                const x = sparkW * (j / Math.max(1, r.sparkData.length - 1));
+                                const y = sparkH - (d.v / maxV) * (sparkH - 4) - 2;
+                                return <circle key={j} cx={x} cy={y} r={2.5} fill={trend} />;
+                              })}
+                            </svg>
+                            <span style={{ fontSize: 10, fontWeight: 900, color: trend, minWidth: 28 }}>
+                              {lastV > firstV ? '↑' : lastV < firstV ? '↓' : '→'} {Math.abs(lastV - firstV)}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+          )}
 
           <footer style={{ textAlign: 'center', fontSize: 10, color: palette.muted, padding: '3px 0 10px' }}>Risk Management Dashboard · {period} · Click any risk row to update selected risk detail</footer>
         </main>
@@ -1578,130 +2375,77 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 interface FunnelStage { label: string; count: number; pct: number; }
 
 function MitigationFunnelChart({ data, palette }: { data: FunnelStage[]; palette: ThemePalette }) {
-  // Gradient: cyan (#00AEEF) → teal (#12D6B1) → gold (#C9A84C) → orange (#E67E22)
-  const STAGE_COLORS = [
-    '#00AEEF', // Total Risks    — cyan
-    '#12D6B1', // In Progress    — teal
-    '#4FC3F7', // Progress ≥ 50% — sky-blue
-    '#C9A84C', // Progress ≥ 80% — gold
-    '#E67E22', // Completed      — orange
-  ];
-
-  const STAGE_ICONS = ['\u25A0', '\u25B6', '\u25B6', '\u25B6', '\u2713'];
-
-  const svgW = 340;
-  const svgH = 300;
-  const maxBarW = 260;   // width of the widest bar (stage 0)
-  const barH = 38;       // height of each bar
-  const gap = 10;        // vertical gap between bars
-  const labelAreaW = 70; // right-side label area
-  const barStartX = 10;  // left edge of bars
-
+  const STAGE_COLORS = ['#00AEEF', '#12D6B1', '#4FC3F7', '#C9A84C', '#27AE60'];
+  const svgW = 380;
+  const svgH = 310;
+  const maxW = 300;
+  const minW = 80;
+  const barH = 42;
+  const gap = 8;
+  const leftPad = 10;
   const total = data[0]?.count || 1;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
-      <svg
-        viewBox={`0 0 ${svgW} ${svgH}`}
-        width="100%"
-        style={{ display: 'block', maxHeight: 320 }}
-        aria-label="Mitigation Pipeline Funnel"
-      >
-        {/* Gradient defs */}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <svg viewBox={`0 0 ${svgW} ${svgH}`} width="100%" style={{ display: 'block', maxHeight: 330 }} aria-label="Mitigation Pipeline Funnel">
         <defs>
           {STAGE_COLORS.map((color, i) => (
-            <linearGradient key={i} id={`funnel-grad-${i}`} x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={color} stopOpacity="0.85" />
-              <stop offset="100%" stopColor={color} stopOpacity="0.55" />
+            <linearGradient key={i} id={`fg2-${i}`} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={color} stopOpacity="1" />
+              <stop offset="100%" stopColor={color} stopOpacity="0.65" />
             </linearGradient>
           ))}
+          <filter id="funnel-shadow" x="-5%" y="-5%" width="115%" height="130%">
+            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="rgba(0,0,0,0.25)" />
+          </filter>
         </defs>
 
         {data.map((stage, i) => {
-          const barW = total > 0 ? Math.max(40, Math.round((stage.count / total) * maxBarW)) : maxBarW;
-          const y = i * (barH + gap) + 4;
-          const cx = barStartX + maxBarW / 2; // center of bar area
+          const barW = Math.max(minW, Math.round((stage.count / total) * maxW));
+          const cx = leftPad + maxW / 2;
           const x = cx - barW / 2;
+          const y = i * (barH + gap) + 4;
           const color = STAGE_COLORS[i];
-          const labelX = barStartX + maxBarW + 8;
+          const labelX = leftPad + maxW + 14;
 
           return (
             <g key={stage.label}>
-              {/* Connector trapezoid to next bar */}
+              {/* Trapezoid connector */}
               {i < data.length - 1 && (() => {
-                const nextCount = data[i + 1].count;
-                const nextBarW = total > 0 ? Math.max(40, Math.round((nextCount / total) * maxBarW)) : maxBarW;
-                const nextCx = cx;
-                const nextX = nextCx - nextBarW / 2;
-                const connY = y + barH;
-                const connH = gap;
-                return (
-                  <polygon
-                    points={`${x},${connY} ${x + barW},${connY} ${nextX + nextBarW},${connY + connH} ${nextX},${connY + connH}`}
-                    fill={color}
-                    opacity={0.18}
-                  />
-                );
+                const nW = Math.max(minW, Math.round((data[i + 1].count / total) * maxW));
+                const nX = cx - nW / 2;
+                const cY = y + barH;
+                return <polygon points={`${x},${cY} ${x + barW},${cY} ${nX + nW},${cY + gap} ${nX},${cY + gap}`} fill={color} opacity={0.15} />;
               })()}
 
-              {/* Main bar */}
-              <rect
-                x={x}
-                y={y}
-                width={barW}
-                height={barH}
-                rx={6}
-                ry={6}
-                fill={`url(#funnel-grad-${i})`}
-                stroke={color}
-                strokeWidth={1.2}
-                strokeOpacity={0.6}
-              />
+              {/* Bar */}
+              <rect x={x} y={y} width={barW} height={barH} rx={7} ry={7}
+                fill={`url(#fg2-${i})`} stroke={color} strokeWidth={1.5} strokeOpacity={0.7}
+                filter="url(#funnel-shadow)" />
 
-              {/* Stage label inside bar */}
-              <text
-                x={cx}
-                y={y + barH / 2}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize="11"
-                fontWeight="800"
-                fontFamily="DM Sans, sans-serif"
-                fill="#ffffff"
-                style={{ textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}
-              >
-                {STAGE_ICONS[i]} {stage.label}
+              {/* Label inside */}
+              <text x={cx} y={y + barH / 2 - 6} textAnchor="middle" dominantBaseline="central"
+                fontSize="11" fontWeight="900" fontFamily="DM Sans, sans-serif" fill="#fff">
+                {stage.label}
+              </text>
+              <text x={cx} y={y + barH / 2 + 9} textAnchor="middle" dominantBaseline="central"
+                fontSize="10" fontWeight="700" fontFamily="DM Sans, sans-serif" fill="rgba(255,255,255,0.82)">
+                {stage.count} risks
               </text>
 
-              {/* Count + % label on right */}
-              <text
-                x={labelX}
-                y={y + barH / 2 - 6}
-                fontSize="13"
-                fontWeight="900"
-                fontFamily="DM Sans, sans-serif"
-                fill={color}
-                dominantBaseline="central"
-              >
+              {/* Right-side count + % */}
+              <text x={labelX} y={y + barH / 2 - 6} fontSize="15" fontWeight="950"
+                fontFamily="DM Sans, sans-serif" fill={color} dominantBaseline="central">
                 {stage.count}
               </text>
-              <text
-                x={labelX}
-                y={y + barH / 2 + 10}
-                fontSize="9.5"
-                fontWeight="700"
-                fontFamily="DM Sans, sans-serif"
-                fill={palette.muted}
-                dominantBaseline="central"
-              >
-                {stage.pct}% of total
+              <text x={labelX} y={y + barH / 2 + 10} fontSize="9" fontWeight="700"
+                fontFamily="DM Sans, sans-serif" fill={palette.muted} dominantBaseline="central">
+                {stage.pct}%
               </text>
             </g>
           );
         })}
       </svg>
-
-      {/* Legend row */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 10px', justifyContent: 'center', marginTop: 4 }}>
         {data.map((stage, i) => (
           <span key={stage.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: palette.muted, fontWeight: 800 }}>
@@ -1739,4 +2483,356 @@ function pillCircle(color: string): CSSProperties {
 
 function tableTd(color: string, palette: ThemePalette): CSSProperties {
   return { padding: '7px 9px', color, borderBottom: `1px solid ${palette.border}`, borderRight: `1px solid ${palette.border}`, whiteSpace: 'nowrap', verticalAlign: 'middle' };
+}
+
+// ─── 5×5 Risk Heat Map ───────────────────────────────────────────────────────
+
+interface HeatMapCell {
+  likelihood: number;
+  impact: number;
+  risks: { title: string; score: number; rating: string }[];
+}
+
+function cellColor(likelihood: number, impact: number): string {
+  const score = likelihood * impact;
+  if (score >= 20) return '#C0392B';   // Very High
+  if (score >= 15) return '#E67E22';   // High
+  if (score >= 9)  return '#F39C12';   // Moderate
+  if (score >= 5)  return '#27AE60';   // Low
+  return '#2ECC71';                     // Very Low
+}
+
+function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: ThemePalette; isDark: boolean }) {
+  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; cell: HeatMapCell } | null>(null);
+
+  // Build 5×5 grid
+  const grid: HeatMapCell[][] = Array.from({ length: 5 }, (_, li) =>
+    Array.from({ length: 5 }, (_, ii) => ({
+      likelihood: li + 1,
+      impact: ii + 1,
+      risks: [],
+    }))
+  );
+
+  risks.forEach(r => {
+    const li = Math.min(Math.max(Math.round(r.likelihood) - 1, 0), 4);
+    const ii = Math.min(Math.max(Math.round(r.impact) - 1, 0), 4);
+    grid[li][ii].risks.push({ title: r.title, score: r.score, rating: r.rating });
+  });
+
+  const LABELS = ['1 — Rare', '2 — Unlikely', '3 — Possible', '4 — Likely', '5 — Almost Certain'];
+  const IMPACT_LABELS = ['1 — Negligible', '2 — Minor', '3 — Moderate', '4 — Major', '5 — Catastrophic'];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+        {[['#C0392B', 'Very High (20–25)'], ['#E67E22', 'High (15–19)'], ['#F39C12', 'Moderate (9–14)'], ['#27AE60', 'Low (5–8)'], ['#2ECC71', 'Very Low (1–4)']].map(([c, l]) => (
+          <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, color: palette.muted, fontWeight: 800 }}>
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: c, display: 'inline-block' }} />{l}
+          </span>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 0 }}>
+        {/* Y-axis label */}
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', marginRight: 6 }}>
+          <span style={{ fontSize: 9, fontWeight: 900, color: palette.muted, writingMode: 'vertical-rl', transform: 'rotate(180deg)', letterSpacing: 1 }}>LIKELIHOOD →</span>
+        </div>
+
+        <div style={{ flex: 1 }}>
+          {/* Grid — rows = likelihood (5 down to 1), cols = impact (1 to 5) */}
+          {[4, 3, 2, 1, 0].map(li => (
+            <div key={li} style={{ display: 'flex', alignItems: 'stretch', marginBottom: 2 }}>
+              {/* Row label */}
+              <div style={{ width: 110, flexShrink: 0, display: 'flex', alignItems: 'center', paddingRight: 6 }}>
+                <span style={{ fontSize: 9, color: palette.muted, fontWeight: 700, textAlign: 'right', width: '100%' }}>{LABELS[li]}</span>
+              </div>
+              {/* Cells */}
+              {[0, 1, 2, 3, 4].map(ii => {
+                const cell = grid[li][ii];
+                const key = `${li}-${ii}`;
+                const bg = cellColor(li + 1, ii + 1);
+                const count = cell.risks.length;
+                return (
+                  <div
+                    key={ii}
+                    style={{
+                      flex: 1, minHeight: 52, margin: '0 2px', borderRadius: 8,
+                      background: count > 0 ? bg : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                      border: `2px solid ${count > 0 ? bg : palette.border}`,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      cursor: count > 0 ? 'pointer' : 'default',
+                      opacity: count > 0 ? 1 : 0.35,
+                      transition: 'transform 0.15s, opacity 0.15s',
+                      transform: hoveredCell === key ? 'scale(1.06)' : 'scale(1)',
+                      position: 'relative',
+                    }}
+                    onMouseEnter={e => {
+                      if (count > 0) {
+                        setHoveredCell(key);
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        setTooltip({ x: rect.left, y: rect.bottom + 6, cell });
+                      }
+                    }}
+                    onMouseLeave={() => { setHoveredCell(null); setTooltip(null); }}
+                  >
+                    {count > 0 && (
+                      <>
+                        <span style={{ fontSize: 18, fontWeight: 950, color: '#fff', fontFamily: 'DM Sans, sans-serif', lineHeight: 1 }}>{count}</span>
+                        <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.8)', fontWeight: 700 }}>risk{count > 1 ? 's' : ''}</span>
+                      </>
+                    )}
+                    {count === 0 && (
+                      <span style={{ fontSize: 11, color: palette.border }}>—</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {/* X-axis labels */}
+          <div style={{ display: 'flex', marginLeft: 116 }}>
+            {IMPACT_LABELS.map((l, i) => (
+              <div key={i} style={{ flex: 1, margin: '0 2px', textAlign: 'center' }}>
+                <span style={{ fontSize: 8.5, color: palette.muted, fontWeight: 700 }}>{l}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ textAlign: 'center', marginTop: 4 }}>
+            <span style={{ fontSize: 9, fontWeight: 900, color: palette.muted, letterSpacing: 1 }}>IMPACT →</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Hover tooltip */}
+      {tooltip && (
+        <div style={{
+          position: 'fixed', left: tooltip.x, top: tooltip.y, zIndex: 9999,
+          background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 10,
+          padding: '10px 14px', fontSize: 11, boxShadow: '0 8px 28px rgba(0,0,0,.22)',
+          maxWidth: 280, pointerEvents: 'none',
+        }}>
+          <div style={{ fontWeight: 900, color: palette.text, marginBottom: 6 }}>
+            Likelihood {tooltip.cell.likelihood} × Impact {tooltip.cell.impact} = Score {tooltip.cell.likelihood * tooltip.cell.impact}
+          </div>
+          {tooltip.cell.risks.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: ZONE_COLORS[r.rating as keyof typeof ZONE_COLORS] || '#888', flexShrink: 0 }} />
+              <span style={{ color: palette.muted, fontSize: 10 }}>{r.title}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Score matrix reference */}
+      <div style={{ marginTop: 8, padding: '8px 12px', background: palette.cardSoft, borderRadius: 10, border: `1px solid ${palette.border}` }}>
+        <span style={{ fontSize: 10, fontWeight: 900, color: palette.text }}>Score Matrix Reference: </span>
+        <span style={{ fontSize: 10, color: palette.muted }}>Score = Likelihood × Impact. Hover over any cell to see the risks plotted there.</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Risk Score Velocity Chart ───────────────────────────────────────────────
+
+function RiskVelocityChart({ data, palette }: { data: { items: { title: string; inherent: number; residual: number; target: number; gap: number; rating: string }[]; avgInherent: number; avgResidual: number; avgTarget: number }; palette: ThemePalette }) {
+  const maxScore = Math.max(...data.items.map(d => d.inherent), 25);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Avg summary row */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Avg Inherent', value: data.avgInherent, color: SE.red },
+          { label: 'Avg Residual', value: data.avgResidual, color: SE.gold },
+          { label: 'Avg Target', value: data.avgTarget, color: SE.green },
+          { label: 'Avg Gap (Residual − Target)', value: Math.round((data.avgResidual - data.avgTarget) * 10) / 10, color: data.avgResidual > data.avgTarget ? SE.orange : SE.green },
+        ].map(m => (
+          <div key={m.label} style={{ flex: '1 1 120px', background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 12, padding: '10px 14px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <span style={{ fontSize: 22, fontWeight: 950, color: m.color, fontFamily: 'DM Sans, sans-serif' }}>{m.value}</span>
+            <span style={{ fontSize: 9.5, fontWeight: 800, color: palette.muted, textAlign: 'center' }}>{m.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-risk velocity bars */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {data.items.map((item, i) => {
+          const inhW = (item.inherent / maxScore) * 100;
+          const resW = (item.residual / maxScore) * 100;
+          const tgtW = (item.target / maxScore) * 100;
+          const gapColor = item.gap > 0 ? SE.orange : SE.green;
+          return (
+            <div key={i} style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 10, padding: '8px 12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: palette.text, maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 10, color: palette.muted }}>Gap:</span>
+                  <span style={{ fontSize: 11, fontWeight: 900, color: gapColor }}>{item.gap > 0 ? '+' : ''}{item.gap}</span>
+                  <span style={{ background: `${ZONE_COLORS[item.rating as keyof typeof ZONE_COLORS] || '#888'}22`, color: ZONE_COLORS[item.rating as keyof typeof ZONE_COLORS] || '#888', border: `1px solid ${ZONE_COLORS[item.rating as keyof typeof ZONE_COLORS] || '#888'}`, borderRadius: 5, padding: '1px 7px', fontSize: 9.5, fontWeight: 800 }}>{item.rating}</span>
+                </div>
+              </div>
+              {/* Three stacked bars */}
+              {[
+                { label: 'Inherent', value: item.inherent, width: inhW, color: SE.red },
+                { label: 'Residual', value: item.residual, width: resW, color: SE.gold },
+                { label: 'Target', value: item.target, width: tgtW, color: SE.green },
+              ].map(bar => (
+                <div key={bar.label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                  <span style={{ fontSize: 9, color: palette.muted, width: 52, textAlign: 'right', fontWeight: 700 }}>{bar.label}</span>
+                  <div style={{ flex: 1, height: 8, background: palette.border, borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${bar.width}%`, height: '100%', background: bar.color, borderRadius: 4, transition: 'width 0.7s ease' }} />
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 900, color: bar.color, minWidth: 20, textAlign: 'right' }}>{bar.value}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {[['Inherent Score', SE.red], ['Residual Score', SE.gold], ['Target Score', SE.green]].map(([l, c]) => (
+          <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, color: palette.muted, fontWeight: 800 }}>
+            <span style={{ width: 28, height: 8, borderRadius: 4, background: c, display: 'inline-block' }} />{l}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Risk Taxonomy Chart ─────────────────────────────────────────────────────
+
+const TAXONOMY_COLORS = [
+  '#0078FF', '#00AEEF', '#12D6B1', '#C9A84C', '#E67E22', '#C0392B', '#8E44AD', '#27AE60', '#2980B9', '#F39C12',
+];
+
+function RiskTaxonomyChart({ data, palette }: { data: { categories: { name: string; count: number; subCategories: { name: string; count: number }[] }[]; riskTypes: { name: string; count: number }[] }; palette: ThemePalette }) {
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  const total = data.categories.reduce((a, b) => a + b.count, 0);
+
+  const activeCat = activeCategory ? data.categories.find(c => c.name === activeCategory) : null;
+
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+
+      {/* Left: Category donut + sub-category drill-down */}
+      <div style={{ flex: '2 1 340px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ ...chartBox(palette), display: 'flex', flexDirection: 'column' }}>
+          <h3 style={chartTitle(palette)}>Risk Categories — Click to drill down</h3>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {/* Donut */}
+            <div style={{ flex: '0 0 200px' }}>
+              <ResponsiveContainer width={200} height={200}>
+                <PieChart>
+                  <Pie
+                    data={data.categories}
+                    dataKey="count"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={90}
+                    paddingAngle={2}
+                    onClick={(entry: any) => setActiveCategory(prev => prev === entry.name ? null : entry.name)}
+                  >
+                    {data.categories.map((cat, i) => (
+                      <Cell
+                        key={cat.name}
+                        fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]}
+                        stroke={activeCategory === cat.name ? '#fff' : 'transparent'}
+                        strokeWidth={activeCategory === cat.name ? 3 : 0}
+                        opacity={activeCategory && activeCategory !== cat.name ? 0.4 : 1}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0].payload;
+                      return (
+                        <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
+                          <div style={{ fontWeight: 900, color: palette.text }}>{d.name}</div>
+                          <div style={{ color: palette.muted }}>{d.count} risk{d.count > 1 ? 's' : ''} ({Math.round(d.count / total * 100)}%)</div>
+                        </div>
+                      );
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            {/* Category list */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5, justifyContent: 'center' }}>
+              {data.categories.map((cat, i) => (
+                <div
+                  key={cat.name}
+                  onClick={() => setActiveCategory(prev => prev === cat.name ? null : cat.name)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', opacity: activeCategory && activeCategory !== cat.name ? 0.45 : 1, transition: 'opacity 0.2s' }}
+                >
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: TAXONOMY_COLORS[i % TAXONOMY_COLORS.length], flexShrink: 0 }} />
+                  <span style={{ fontSize: 10, color: palette.text, fontWeight: 800, flex: 1 }}>{cat.name}</span>
+                  <span style={{ fontSize: 10, fontWeight: 900, color: TAXONOMY_COLORS[i % TAXONOMY_COLORS.length] }}>{cat.count}</span>
+                  <span style={{ fontSize: 9, color: palette.muted }}>({Math.round(cat.count / total * 100)}%)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sub-category drill-down */}
+          {activeCat && (
+            <div style={{ marginTop: 10, padding: '8px 10px', background: palette.cardAlt, borderRadius: 10, border: `1px solid ${palette.border}` }}>
+              <div style={{ fontWeight: 900, fontSize: 11, color: palette.text, marginBottom: 6 }}>{activeCat.name} — Sub-categories</div>
+              {activeCat.subCategories.map((sub, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <div style={{ flex: 1, height: 7, background: palette.border, borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${(sub.count / activeCat.count) * 100}%`, height: '100%', background: SE.cyan, borderRadius: 3 }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: palette.muted, minWidth: 100 }}>{sub.name}</span>
+                  <span style={{ fontSize: 10, fontWeight: 900, color: SE.cyan }}>{sub.count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right: Risk Type bar chart */}
+      <div style={{ flex: '1 1 220px' }}>
+        <div style={chartBox(palette)}>
+          <h3 style={chartTitle(palette)}>Risk Type Distribution</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={data.riskTypes} layout="vertical" margin={{ top: 4, right: 40, left: 10, bottom: 4 }} barSize={16}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+              <XAxis type="number" tick={{ fontSize: 10, fill: palette.muted }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={false} tickLine={false} width={110} />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
+                      <div style={{ fontWeight: 900, color: palette.text }}>{payload[0].payload.name}</div>
+                      <div style={{ color: SE.blue }}>{payload[0].value} risks</div>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="count" name="Risks" radius={[0, 6, 6, 0]} animationDuration={700}
+                label={{ position: 'right', fontSize: 10, fontWeight: 900, fill: SE.blue, formatter: (v: number) => v }}
+              >
+                {data.riskTypes.map((_, i) => (
+                  <Cell key={i} fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -64,6 +64,16 @@ export interface RiskRow {
   likelihood: number;   // 1–5
   impact: number;       // 1–5
   residualScore: number;  // latest residual score (0 if not available)
+  tScore: number;         // target risk score
+  category: string;       // risk category (e.g. "Supplier Management")
+  subCategory: string;    // sub-category (e.g. "Process")
+  riskType: string;       // risk type (e.g. "Division Level")
+  kriName: string;        // monitoring indicator / KRI name
+  kriMeasure: string;     // KRI measure description
+  kriUnit: string;        // KRI unit (%, #, etc.)
+  kriTarget: number;      // KRI target value
+  kriActual: number;      // KRI actual value
+  isOverdue: boolean;     // true if closing date is past and not completed
 }
 
 export interface DashboardData {
@@ -99,6 +109,23 @@ export interface DashboardData {
     zoneCounts: { veryHigh: number; high: number; moderate: number; low: number; veryLow: number };
     avgResidualScore: number;
     avgInherentScore: number;
+  };
+  overdueActions: {
+    count: number;
+    items: { riskTitle: string; closingDate: string; progressStatus: string; currentPct: number; owner: string }[];
+  };
+  kriData: {
+    items: { riskTitle: string; kriName: string; kriMeasure: string; kriUnit: string; kriTarget: number; kriActual: number; status: 'on-track' | 'at-risk' | 'breached' }[];
+  };
+  taxonomyData: {
+    categories: { name: string; count: number; subCategories: { name: string; count: number }[] }[];
+    riskTypes: { name: string; count: number }[];
+  };
+  velocityData: {
+    items: { title: string; inherent: number; residual: number; target: number; gap: number; rating: string }[];
+    avgInherent: number;
+    avgResidual: number;
+    avgTarget: number;
   };
 }
 
@@ -333,6 +360,21 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const COL_ACTION_WEIGHT = findCol(colMap, 'action weight');
   const COL_CLOSING_DATE = findCol(colMap, 'closing date');
   const COL_PROGRESS_STATUS = findCol(colMap, 'progress status');
+  const COL_T_SCORE          = findCol(colMap, 't-score', 'target score', 'tscore');
+  const COL_CATEGORY         = findCol(colMap, 'category');
+  const COL_SUB_CATEGORY     = findCol(colMap, 'sub - category', 'sub-category', 'sub category', 'subcategory');
+  const COL_RISK_TYPE        = findCol(colMap, 'risk type');
+  const COL_KRI_NAME         = findCol(colMap, 'monitoring indicators', 'monitoring indicator', 'kri', 'key risk indicator');
+  const COL_KRI_MEASURE      = findCol(colMap, 'measure');
+  const COL_KRI_UNIT         = findCol(colMap, 'unit');
+  // KRI target and actual: there may be two "Target" columns — we want the one AFTER the KRI name column
+  let COL_KRI_TARGET = -1;
+  let COL_KRI_ACTUAL = -1;
+  for (let i = 0; i < headerRow.length; i++) {
+    const h = safeStr(headerRow[i]).toLowerCase().trim();
+    if (h === 'target' && i > (COL_KRI_NAME > 0 ? COL_KRI_NAME : 0) && COL_KRI_TARGET === -1) COL_KRI_TARGET = i;
+    if (h === 'actual' && i > (COL_KRI_NAME > 0 ? COL_KRI_NAME : 0) && COL_KRI_ACTUAL === -1) COL_KRI_ACTUAL = i;
+  }
 
   // ── Detect period (month/week) columns ───────────────────────────────────
   const weeks = detectPeriodColumns(headerRow);
@@ -373,6 +415,15 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const likelihoodMap: Record<string, number> = {};
   const impactMap: Record<string, number> = {};
   const residualScoreMap: Record<string, number> = {};
+  const tScoreMap: Record<string, number> = {};
+  const categoryMap: Record<string, string> = {};
+  const subCategoryMap: Record<string, string> = {};
+  const riskTypeMap: Record<string, string> = {};
+  const kriNameMap: Record<string, string> = {};
+  const kriMeasureMap: Record<string, string> = {};
+  const kriUnitMap: Record<string, string> = {};
+  const kriTargetMap: Record<string, number> = {};
+  const kriActualMap: Record<string, number> = {};
 
   let currentRisk = '';
 
@@ -404,6 +455,15 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       likelihoodMap[currentRisk]   = COL_LIKELIHOOD >= 0     ? safeNum(row[COL_LIKELIHOOD])   : 0;
       impactMap[currentRisk]       = COL_IMPACT >= 0         ? safeNum(row[COL_IMPACT])       : 0;
       residualScoreMap[currentRisk]= COL_RESIDUAL_SCORE >= 0 ? safeNum(row[COL_RESIDUAL_SCORE]) : 0;
+      tScoreMap[currentRisk]       = COL_T_SCORE >= 0        ? safeNum(row[COL_T_SCORE])       : 0;
+      categoryMap[currentRisk]     = COL_CATEGORY >= 0       ? safeStr(row[COL_CATEGORY])      : '';
+      subCategoryMap[currentRisk]  = COL_SUB_CATEGORY >= 0   ? safeStr(row[COL_SUB_CATEGORY])  : '';
+      riskTypeMap[currentRisk]     = COL_RISK_TYPE >= 0      ? safeStr(row[COL_RISK_TYPE])     : '';
+      kriNameMap[currentRisk]      = COL_KRI_NAME >= 0       ? safeStr(row[COL_KRI_NAME])      : '';
+      kriMeasureMap[currentRisk]   = COL_KRI_MEASURE >= 0    ? safeStr(row[COL_KRI_MEASURE])   : '';
+      kriUnitMap[currentRisk]      = COL_KRI_UNIT >= 0       ? safeStr(row[COL_KRI_UNIT])      : '';
+      kriTargetMap[currentRisk]    = COL_KRI_TARGET >= 0     ? safeNum(row[COL_KRI_TARGET])    : 0;
+      kriActualMap[currentRisk]    = COL_KRI_ACTUAL >= 0     ? safeNum(row[COL_KRI_ACTUAL])    : 0;
     }
 
     if (!currentRisk) continue;
@@ -464,6 +524,16 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       likelihood: likelihoodMap[title] ?? 0,
       impact: impactMap[title] ?? 0,
       residualScore: residualScoreMap[title] ?? 0,
+      tScore: tScoreMap[title] ?? 0,
+      category: categoryMap[title] ?? '',
+      subCategory: subCategoryMap[title] ?? '',
+      riskType: riskTypeMap[title] ?? '',
+      kriName: kriNameMap[title] ?? '',
+      kriMeasure: kriMeasureMap[title] ?? '',
+      kriUnit: kriUnitMap[title] ?? '',
+      kriTarget: kriTargetMap[title] ?? 0,
+      kriActual: kriActualMap[title] ?? 0,
+      isOverdue: false, // computed below after riskRegister is built
     };
   });
 
@@ -499,6 +569,109 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
     veryLow:  riskRegister.filter(r => r.residualScore > 0   && r.residualScore < 5).length,
   };
 
+  // ── Overdue detection ────────────────────────────────────────────────────
+  // A quarter label like "Q1 2026" is overdue if it is before the current quarter.
+  // A real date string is overdue if it is before today.
+  // We also mark isOverdue on each RiskRow.
+  const currentDate = new Date();
+  function isClosingDateOverdue(cd: string, pct: number): boolean {
+    if (pct >= 100) return false; // completed
+    if (!cd) return false;
+    const qMatch = cd.match(/Q(\d)\s*(\d{4})/);
+    if (qMatch) {
+      const q = parseInt(qMatch[1]);
+      const y = parseInt(qMatch[2]);
+      const qEndMonth = q * 3; // Q1→3, Q2→6, Q3→9, Q4→12
+      const qEndDate = new Date(y, qEndMonth, 1); // first day after quarter ends
+      return qEndDate <= currentDate;
+    }
+    // Try parsing as a real date
+    const d = new Date(cd);
+    if (!isNaN(d.getTime())) return d < currentDate;
+    return false;
+  }
+
+  // Mark isOverdue on each risk
+  riskRegister.forEach(r => {
+    r.isOverdue = isClosingDateOverdue(r.closingDate, r.currentPct);
+  });
+
+  const overdueItems = riskRegister
+    .filter(r => r.isOverdue)
+    .map(r => ({
+      riskTitle: r.title,
+      closingDate: r.closingDate,
+      progressStatus: r.progressStatus,
+      currentPct: r.currentPct,
+      owner: r.owner,
+    }));
+
+  // ── KRI aggregation ───────────────────────────────────────────────────────
+  function kriStatus(target: number, actual: number, unit: string): 'on-track' | 'at-risk' | 'breached' {
+    if (target === 0) return 'on-track';
+    // For % units (0-1 range), compare directly; for count units compare as numbers
+    const ratio = actual / target;
+    if (ratio <= 1.0) return 'on-track';
+    if (ratio <= 1.3) return 'at-risk';
+    return 'breached';
+  }
+
+  const kriItems = riskRegister
+    .filter(r => r.kriName)
+    .map(r => ({
+      riskTitle: r.title,
+      kriName: r.kriName,
+      kriMeasure: r.kriMeasure,
+      kriUnit: r.kriUnit,
+      kriTarget: r.kriTarget,
+      kriActual: r.kriActual,
+      status: kriStatus(r.kriTarget, r.kriActual, r.kriUnit),
+    }));
+
+  // ── Taxonomy aggregation ─────────────────────────────────────────────────
+  const catMap = new Map<string, Map<string, number>>();
+  riskRegister.forEach(r => {
+    const cat = r.category || 'Uncategorised';
+    const sub = r.subCategory || 'Other';
+    if (!catMap.has(cat)) catMap.set(cat, new Map());
+    const subMap = catMap.get(cat)!;
+    subMap.set(sub, (subMap.get(sub) ?? 0) + 1);
+  });
+  const categories = Array.from(catMap.entries())
+    .map(([name, subMap]) => ({
+      name,
+      count: Array.from(subMap.values()).reduce((a, b) => a + b, 0),
+      subCategories: Array.from(subMap.entries()).map(([sn, sc]) => ({ name: sn, count: sc })),
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const riskTypeCount = new Map<string, number>();
+  riskRegister.forEach(r => {
+    const t = r.riskType || 'Unknown';
+    riskTypeCount.set(t, (riskTypeCount.get(t) ?? 0) + 1);
+  });
+  const riskTypes = Array.from(riskTypeCount.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  // ── Velocity (Inherent → Residual → Target) ───────────────────────────────
+  const velocityItems = riskRegister
+    .filter(r => r.score > 0)
+    .map(r => ({
+      title: r.title,
+      inherent: r.score,
+      residual: r.residualScore,
+      target: r.tScore,
+      gap: r.residualScore - r.tScore,  // positive = still above target
+      rating: r.rating,
+    }))
+    .sort((a, b) => b.inherent - a.inherent);
+
+  const velScores = velocityItems.filter(v => v.inherent > 0);
+  const avgVelInherent = velScores.length > 0 ? Math.round(velScores.reduce((a, b) => a + b.inherent, 0) / velScores.length * 10) / 10 : 0;
+  const avgVelResidual = velScores.length > 0 ? Math.round(velScores.reduce((a, b) => a + b.residual, 0) / velScores.length * 10) / 10 : 0;
+  const avgVelTarget   = velScores.length > 0 ? Math.round(velScores.filter(v => v.target > 0).reduce((a, b) => a + b.target, 0) / (velScores.filter(v => v.target > 0).length || 1) * 10) / 10 : 0;
+
   return {
     period: selectedWeek,
     weeks,
@@ -521,6 +694,23 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       zoneCounts: residualZoneCounts,
       avgResidualScore,
       avgInherentScore: avgRiskScore,
+    },
+    overdueActions: {
+      count: overdueItems.length,
+      items: overdueItems,
+    },
+    kriData: {
+      items: kriItems,
+    },
+    taxonomyData: {
+      categories,
+      riskTypes,
+    },
+    velocityData: {
+      items: velocityItems,
+      avgInherent: avgVelInherent,
+      avgResidual: avgVelResidual,
+      avgTarget: avgVelTarget,
     },
   };
 }
@@ -600,6 +790,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Implement monitoring report and review cycle.\n2. Perform field inspection and close corrective actions.',
       weekProgress: { 'Jan-2026': 0.42, 'Feb-2026': 0.45, 'Mar-2026': 0.51, 'Apr-2026': 0.50 },
       currentPct: 50, beforePct: 51, developmentPct: -1, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 3, residualScore: 6,
+      tScore: 6, category: 'Supplier Management', subCategory: 'Process', riskType: 'Division Level',
+      kriName: 'Backup test success rate', kriMeasure: 'Test pass rate', kriUnit: '%', kriTarget: 0.7, kriActual: 2, isOverdue: false,
     },
     {
       id: '2', title: 'Documentation Accuracy Risk',
@@ -608,6 +800,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Coordinate with supplier and agree delivery schedule.\n2. Automate weekly KPI report.',
       weekProgress: { 'Jan-2026': 0.00, 'Feb-2026': 0.01, 'Mar-2026': 0.02, 'Apr-2026': 0.02 },
       currentPct: 2, beforePct: 2, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 3, residualScore: 4,
+      tScore: 4, category: 'Business Resilience', subCategory: 'People', riskType: 'Division Level',
+      kriName: 'Documentation error rate', kriMeasure: 'Error count per audit', kriUnit: '#', kriTarget: 2, kriActual: 5, isOverdue: false,
     },
     {
       id: '3', title: 'Access Control Compliance Risk',
@@ -616,6 +810,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Enforce MFA on all critical systems.\n2. Conduct quarterly access reviews.',
       weekProgress: { 'Jan-2026': 0.30, 'Feb-2026': 0.28, 'Mar-2026': 0.38, 'Apr-2026': 0.38 },
       currentPct: 38, beforePct: 38, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 4, residualScore: 12,
+      tScore: 9, category: 'Compliance', subCategory: 'Security', riskType: 'Project Level',
+      kriName: 'Number of overdue actions', kriMeasure: 'Overdue action count', kriUnit: '#', kriTarget: 0.9, kriActual: 4, isOverdue: true,
     },
     {
       id: '4', title: 'Incident Response Delay Risk',
@@ -624,6 +820,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Define SLA for incident response.\n2. Automate escalation workflows.',
       weekProgress: { 'Jan-2026': 0.00, 'Feb-2026': 0.00, 'Mar-2026': 0.00, 'Apr-2026': 0.02 },
       currentPct: 2, beforePct: 0, developmentPct: 2, aboveTarget: false, belowTarget: true, likelihood: 1, impact: 1, residualScore: 1,
+      tScore: 1, category: 'Asset Management', subCategory: 'Facilities', riskType: 'Department Level',
+      kriName: 'Incident response time', kriMeasure: 'Avg hours to resolve', kriUnit: 'hrs', kriTarget: 4, kriActual: 2, isOverdue: false,
     },
     {
       id: '5', title: 'Inventory Shortage Risk',
@@ -632,6 +830,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Establish safety stock levels.\n2. Diversify supplier base.',
       weekProgress: { 'Jan-2026': 0.94, 'Feb-2026': 0.94, 'Mar-2026': 0.93, 'Apr-2026': 1.00 },
       currentPct: 100, beforePct: 93, developmentPct: 7, aboveTarget: true, belowTarget: false, likelihood: 4, impact: 4, residualScore: 9,
+      tScore: 8, category: 'Supplier Management', subCategory: 'Vendors', riskType: 'Division Level',
+      kriName: 'Supplier delivery rate', kriMeasure: 'On-time delivery %', kriUnit: '%', kriTarget: 0.9, kriActual: 0.85, isOverdue: false,
     },
     {
       id: '6', title: 'Service Desk Workload Risk',
@@ -640,6 +840,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Hire additional service desk agents.\n2. Implement self-service portal.',
       weekProgress: { 'Jan-2026': 0.59, 'Feb-2026': 0.57, 'Mar-2026': 0.54, 'Apr-2026': 0.64 },
       currentPct: 64, beforePct: 54, developmentPct: 10, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 3, residualScore: 9,
+      tScore: 6, category: 'Operational Excellence', subCategory: 'Process', riskType: 'Department Level',
+      kriName: 'Ticket backlog count', kriMeasure: 'Open tickets', kriUnit: '#', kriTarget: 50, kriActual: 80, isOverdue: false,
     },
     {
       id: '7', title: 'Contract Renewal Delay Risk',
@@ -648,6 +850,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Set 90-day renewal reminders.\n2. Assign contract manager per vendor.',
       weekProgress: { 'Jan-2026': 0.60, 'Feb-2026': 0.59, 'Mar-2026': 0.56, 'Apr-2026': 0.60 },
       currentPct: 60, beforePct: 56, developmentPct: 4, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 3, residualScore: 6,
+      tScore: 4, category: 'Supplier Management', subCategory: 'Vendors', riskType: 'Project Level',
+      kriName: 'Contract renewal lead time', kriMeasure: 'Days before expiry', kriUnit: 'days', kriTarget: 90, kriActual: 45, isOverdue: false,
     },
     {
       id: '8', title: 'Backup Power Availability Risk',
@@ -656,6 +860,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Install UPS at critical sites.\n2. Test generator failover monthly.',
       weekProgress: { 'Jan-2026': 0.01, 'Feb-2026': 0.00, 'Mar-2026': 0.00, 'Apr-2026': 0.00 },
       currentPct: 0, beforePct: 0, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 4, residualScore: 12,
+      tScore: 9, category: 'Business Resilience', subCategory: 'Power Systems', riskType: 'Division Level',
+      kriName: 'Generator test pass rate', kriMeasure: 'Monthly test result', kriUnit: '%', kriTarget: 1, kriActual: 0.6, isOverdue: true,
     },
     {
       id: '9', title: 'Supplier Delivery Delay Risk',
@@ -664,6 +870,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Add penalty clauses for late delivery.\n2. Identify backup suppliers.',
       weekProgress: { 'Jan-2026': 0.38, 'Feb-2026': 0.28, 'Mar-2026': 0.40, 'Apr-2026': 0.34 },
       currentPct: 34, beforePct: 40, developmentPct: -6, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 4, residualScore: 12,
+      tScore: 9, category: 'Supplier Management', subCategory: 'Vendors', riskType: 'Project Level',
+      kriName: 'Supplier SLA compliance', kriMeasure: 'SLA breach count', kriUnit: '#', kriTarget: 2, kriActual: 6, isOverdue: false,
     },
     {
       id: '10', title: 'Network Capacity Saturation Risk',
@@ -672,6 +880,8 @@ export function getSampleData(): DashboardData {
       mitigation: '1. Upgrade core network capacity.\n2. Implement traffic shaping policies.',
       weekProgress: { 'Jan-2026': 0.30, 'Feb-2026': 0.17, 'Mar-2026': 0.29, 'Apr-2026': 0.19 },
       currentPct: 19, beforePct: 29, developmentPct: -10, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 5, residualScore: 16,
+      tScore: 12, category: 'Information Security', subCategory: 'Network', riskType: 'Division Level',
+      kriName: 'Network utilisation peak', kriMeasure: 'Peak bandwidth %', kriUnit: '%', kriTarget: 0.8, kriActual: 0.95, isOverdue: false,
     },
   ];
 
@@ -693,6 +903,52 @@ export function getSampleData(): DashboardData {
       zoneCounts: { veryHigh: 0, high: 2, moderate: 3, low: 3, veryLow: 2 },
       avgResidualScore: 8.7,
       avgInherentScore: 14,
+    },
+    overdueActions: {
+      count: 2,
+      items: [
+        { riskTitle: 'Access Control Compliance Risk', closingDate: 'Q1 2026', progressStatus: 'In Progress (1-99%)', currentPct: 38, owner: 'Hana Blake' },
+        { riskTitle: 'Backup Power Availability Risk', closingDate: 'Q3 2026', progressStatus: 'Not Started (0%)', currentPct: 0, owner: 'Samir Hale' },
+      ],
+    },
+    kriData: {
+      items: sampleRisks.filter(r => r.kriName).map(r => ({
+        riskTitle: r.title,
+        kriName: r.kriName,
+        kriMeasure: r.kriMeasure,
+        kriUnit: r.kriUnit,
+        kriTarget: r.kriTarget,
+        kriActual: r.kriActual,
+        status: (r.kriActual / (r.kriTarget || 1) <= 1.0 ? 'on-track' : r.kriActual / (r.kriTarget || 1) <= 1.3 ? 'at-risk' : 'breached') as 'on-track' | 'at-risk' | 'breached',
+      })),
+    },
+    taxonomyData: {
+      categories: [
+        { name: 'Supplier Management', count: 4, subCategories: [{ name: 'Process', count: 1 }, { name: 'Vendors', count: 3 }] },
+        { name: 'Business Resilience', count: 2, subCategories: [{ name: 'People', count: 1 }, { name: 'Power Systems', count: 1 }] },
+        { name: 'Compliance', count: 1, subCategories: [{ name: 'Security', count: 1 }] },
+        { name: 'Operational Excellence', count: 1, subCategories: [{ name: 'Process', count: 1 }] },
+        { name: 'Information Security', count: 1, subCategories: [{ name: 'Network', count: 1 }] },
+        { name: 'Asset Management', count: 1, subCategories: [{ name: 'Facilities', count: 1 }] },
+      ],
+      riskTypes: [
+        { name: 'Division Level', count: 5 },
+        { name: 'Project Level', count: 3 },
+        { name: 'Department Level', count: 2 },
+      ],
+    },
+    velocityData: {
+      items: sampleRisks.map(r => ({
+        title: r.title,
+        inherent: r.score,
+        residual: r.residualScore,
+        target: r.tScore,
+        gap: r.residualScore - r.tScore,
+        rating: r.rating,
+      })).sort((a, b) => b.inherent - a.inherent),
+      avgInherent: 14,
+      avgResidual: 8.7,
+      avgTarget: 6.8,
     },
   };
 }
