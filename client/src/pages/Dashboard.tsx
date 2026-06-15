@@ -1193,7 +1193,145 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               })}
             </div>
 
-            {/* Mitigation Plans Progress — full-width multi-week trend */}
+            {/* ═══ PROPOSAL ROW 0: Full-width Monthly Threat Frequency by Category ═══ */}
+            <div style={{ ...chartBox(palette), marginBottom: 10 }}>
+              <h3 style={chartTitle(palette)}>Monthly Threat Frequency by Category</h3>
+              {monthlyThreatData.data.length > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={monthlyThreatData.data} margin={{ top: 10, right: 20, left: 0, bottom: 4 }} barCategoryGap="25%">
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                    <XAxis dataKey="week" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    {monthlyThreatData.cats.map(cat => (
+                      <Bar key={cat} dataKey={cat} stackId="a" fill={monthlyThreatData.catColors[cat]} animationDuration={650} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ height: 200, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No category data available — upload an Excel file to populate</div>
+              )}
+              <div style={{ ...legendStyle, marginTop: 6 }}>
+                {monthlyThreatData.cats.map(cat => (
+                  <span key={cat} style={legendItem(palette)}>
+                    <span style={{ width: 9, height: 9, borderRadius: 3, background: monthlyThreatData.catColors[cat] }} />
+                    {cat.length > 18 ? cat.slice(0, 18) + '…' : cat}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* ═══ PROPOSAL ROW 1: Custom Rate donut | Risk Distribution by Dept | Risk Matrix Heatmap ═══ */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+              {/* Custom Rate — category donut */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Custom Rate</h3>
+                <div style={{ position: 'relative', height: 200 }}>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie data={donutData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} paddingAngle={2} dataKey="value" animationDuration={650} labelLine={false} minAngle={8} label={({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) => {
+                        if (!value || value <= 0.3) return null;
+                        const r = innerRadius + (outerRadius - innerRadius) * 0.55;
+                        const x = cx + r * Math.cos(-midAngle * Math.PI / 180);
+                        const y = cy + r * Math.sin(-midAngle * Math.PI / 180);
+                        return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 12, fontWeight: 950, fill: 'white' }}>{value}</text>;
+                      }}>
+                        {donutData.map((d, i) => <Cell key={i} fill={d.color} stroke={palette.cardSolid} strokeWidth={2} />)}
+                      </Pie>
+                      <Tooltip content={<ChartTooltip palette={palette} />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ color: SE.red, fontSize: 28, fontFamily: 'DM Sans, sans-serif', fontWeight: 950 }}>{categoryTotal}</div>
+                      <div style={{ color: palette.muted, fontSize: 9, fontWeight: 800 }}>TOTAL</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={legendStyle}>{donutData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.name}</span>)}</div>
+              </div>
+
+              {/* Risk Distribution by Department — owner bar chart */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Risk Distribution by Department</h3>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={ownerHighRiskData.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 40, left: 4, bottom: 4 }} barCategoryGap="20%">
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+                    <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={110} axisLine={false} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="count" name="Risk Count" fill={SE.blue} radius={[0, 5, 5, 0]} animationDuration={650}
+                      label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: SE.blue, formatter: (v: number) => v }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Risk Matrix Heatmap */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Risk Matrix Heatmap</h3>
+                <RiskHeatMap risks={riskRegister} palette={palette} isDark={isDark} />
+              </div>
+            </div>
+
+            {/* ═══ PROPOSAL ROW 2: Monthly Threat Line | L/I Assessment | Risk Score Gauge ═══ */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+              {/* Monthly Threat Frequency by Category — Line chart */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Monthly Threat Frequency by Category</h3>
+                {weeklyMovementData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={weeklyMovementData} margin={{ top: 10, right: 20, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                      <XAxis dataKey="week" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                      <YAxis tick={{ fontSize: 9, fill: palette.muted }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                      <Tooltip content={<ChartTooltip palette={palette} />} />
+                      <Line type="monotone" dataKey="avgProgress" name="Avg Progress %" stroke={SE.blue} strokeWidth={2.5} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="completed" name="Completed" stroke={SE.green} strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="declined" name="Declined" stroke={SE.red} strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: 200, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No weekly data</div>
+                )}
+                <div style={legendStyle}>
+                  {[[SE.blue,'Avg Progress %'],[SE.green,'Completed'],[SE.red,'Declined']].map(([c,l])=><span key={l} style={legendItem(palette)}><span style={{width:9,height:9,borderRadius:3,background:c}}/>{l}</span>)}
+                </div>
+              </div>
+
+              {/* L/I Assessment Status */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>L/I Assessment Status</h3>
+                {liAssessmentData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={liAssessmentData} layout="vertical" margin={{ top: 4, right: 20, left: 10, bottom: 4 }} barCategoryGap="20%">
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+                      <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                      <YAxis type="category" dataKey="key" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={52} axisLine={false} tickLine={false} />
+                      <Tooltip content={<ChartTooltip palette={palette} />} />
+                      <Bar dataKey="notStarted" name="Not Started" stackId="s" fill={SE.red} animationDuration={650} />
+                      <Bar dataKey="inProgress" name="In Progress" stackId="s" fill={SE.gold} animationDuration={650} />
+                      <Bar dataKey="completed" name="Completed" stackId="s" fill={SE.green} radius={[0, 4, 4, 0]} animationDuration={650} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: 200, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No L/I data</div>
+                )}
+                <div style={legendStyle}>
+                  <span style={legendItem(palette)}><span style={{width:9,height:9,borderRadius:3,background:SE.red}}/>Not Started</span>
+                  <span style={legendItem(palette)}><span style={{width:9,height:9,borderRadius:3,background:SE.gold}}/>In Progress</span>
+                  <span style={legendItem(palette)}><span style={{width:9,height:9,borderRadius:3,background:SE.green}}/>Completed</span>
+                </div>
+              </div>
+
+              {/* Heatmap / Gauge */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Risk Score Gauge</h3>
+                <ProgressGauge score={kpis.avgRiskScore} palette={palette} />
+              </div>
+            </div>
+
+            {/* ═══ PROPOSAL ROW 3 (full-width): Mitigation Plans Progress Target vs Actual ═══ */}
             {outputsVisible['op-target-vs-actual'] && <div style={{ ...chartBox(palette), marginBottom: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
                 <h3 style={chartTitle(palette)}>Mitigation Plans Progress — Target vs Actual (All Weeks)</h3>
@@ -1207,366 +1345,43 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                       <span style={{ fontSize: 13, fontWeight: 900, color: palette.text }}>/</span>
                       <span style={{ fontSize: 22, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, color: SE.blue }}>{last.avgTarget}%</span>
                       <span style={{ fontSize: 11, color: palette.muted, fontWeight: 700 }}>Target</span>
-                      <span style={{ fontSize: 13, fontWeight: 900, color: isBelow ? SE.red : SE.green, marginLeft: 6 }}>
-                        {isBelow ? '▼' : '▲'} Dev {Math.abs(last.dev)}%
-                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: isBelow ? SE.red : SE.green, marginLeft: 6 }}>{isBelow ? '▼' : '▲'} Dev {Math.abs(last.dev)}%</span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: isBelow ? SE.red : SE.green }}>{isBelow ? 'Below target' : 'Above target'}</span>
                     </div>
                   );
                 })()}
               </div>
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={weeklyTargetVsActualData} margin={{ top: 14, right: 20, left: 0, bottom: 4 }} barCategoryGap="30%" barGap={4}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
                   <XAxis dataKey="week" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
-                  <Tooltip
-                    content={({ active, payload, label }) => {
-                      if (!active || !payload?.length) return null;
-                      const d = weeklyTargetVsActualData.find(x => x.week === label);
-                      const dev = d ? d.dev : 0;
-                      const isBelow = dev < 0;
-                      return (
-                        <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '10px 14px', fontSize: 12, boxShadow: '0 4px 16px rgba(0,0,0,.18)' }}>
-                          <div style={{ fontWeight: 900, color: palette.text, marginBottom: 6 }}>{label}</div>
-                          {payload.map((p: any) => (
-                            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                              <span style={{ width: 10, height: 10, borderRadius: 3, background: p.fill, display: 'inline-block' }} />
-                              <span style={{ color: palette.muted }}>{p.name}:</span>
-                              <span style={{ fontWeight: 800, color: palette.text }}>{p.value}%</span>
-                            </div>
-                          ))}
-                          <div style={{ marginTop: 6, borderTop: `1px solid ${palette.border}`, paddingTop: 5, fontWeight: 800, color: isBelow ? SE.red : SE.green }}>
-                            Dev: {isBelow ? '' : '+'}{dev}% — {isBelow ? 'Below target' : 'Above target'}
-                          </div>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 11 }} formatter={v => <span style={{ color: palette.muted, fontSize: 11 }}>{v}</span>} />
-                  <Bar dataKey="avgTarget" name="Avg Target %" fill={SE.blue} radius={[5, 5, 0, 0]} animationDuration={650}
-                    label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: SE.blue, formatter: (v: number) => `${v}%` }}
-                  />
-                  <Bar dataKey="avgActual" name="Avg Actual %" fill={SE.red} radius={[5, 5, 0, 0]} animationDuration={650}
-                    label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: SE.red, formatter: (v: number) => `${v}%` }}
-                  />
+                  <Tooltip content={<ChartTooltip palette={palette} />} />
+                  <Bar dataKey="avgTarget" name="Avg Target %" fill={SE.blue} radius={[5,5,0,0]} animationDuration={650} label={{ position: 'top', fontSize: 10, fontWeight: 900, fill: SE.blue, formatter: (v: number) => `${v}%` }} />
+                  <Bar dataKey="avgActual" name="Avg Actual %" fill={SE.red} radius={[5,5,0,0]} animationDuration={650} label={{ position: 'top', fontSize: 10, fontWeight: 900, fill: SE.red, formatter: (v: number) => `${v}%` }} />
                 </BarChart>
               </ResponsiveContainer>
               <div style={legendStyle}>
                 <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.blue, borderRadius: 2 }} />Avg Target %</span>
                 <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.red, borderRadius: 2 }} />Avg Actual %</span>
-                <span style={{ ...legendItem(palette), marginLeft: 'auto', fontSize: 10, color: palette.muted }}>Target = linear ramp (equal progress expected per week)</span>
               </div>
             </div>}
 
-            {/* Row 1: Donut / Gauge / Heatmap — each individually togglable */}
-            {(outputsVisible['op-category-donut'] || outputsVisible['op-gauge'] || outputsVisible['op-heatmap']) && (
-            <div className="professional-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-              {outputsVisible['op-category-donut'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>1. Risk Category Donut</h3>
-                <div style={{ position: 'relative', height: 210 }}>
-                  <ResponsiveContainer width="100%" height={210}>
-                    <PieChart>
-                      <Pie data={donutData} cx="50%" cy="50%" innerRadius={58} outerRadius={88} paddingAngle={2} dataKey="value" animationDuration={650} labelLine={false} minAngle={8} label={({ cx, cy, midAngle, innerRadius, outerRadius, value, displayValue }: any) => {
-                        // Hide label for 0-value placeholder slices (value === 0.3)
-                        if (!value || value <= 0.3) return null;
-                        const r = innerRadius + (outerRadius - innerRadius) * 0.55;
-                        const x = cx + r * Math.cos(-midAngle * Math.PI / 180);
-                        const y = cy + r * Math.sin(-midAngle * Math.PI / 180);
-                        return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 13, fontWeight: 950, fill: 'white' }}>{displayValue ?? value}</text>;
-                      }}>
-                        {donutData.map((d, i) => <Cell key={i} fill={d.color} stroke={palette.cardSolid} strokeWidth={2} />)}
-                      </Pie>
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}><div style={{ textAlign: 'center' }}><div style={{ color: SE.red, fontSize: 30, fontFamily: 'DM Sans, sans-serif', fontWeight: 950 }}>{categoryTotal}</div><div style={{ color: palette.muted, fontSize: 10, fontWeight: 800 }}>TOTAL RISKS</div></div></div>
-                </div>
-                <div style={legendStyle}>{donutData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.name}</span>)}</div>
-              </div>}
-
-              {outputsVisible['op-gauge'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>2. Risk Score Gauge</h3>
-                <ProgressGauge score={kpis.avgRiskScore} palette={palette} />
-              </div>}
-
-              {outputsVisible['op-heatmap'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>3. Risk Matrix Heatmap</h3>
-                <RiskHeatMap risks={riskRegister} palette={palette} isDark={isDark} />
-              </div>}
-            </div>)}
-
-            {/* Row 2: Weekly Movement / Overdue Bar / Progress Status */}
-            {(outputsVisible['op-weekly-movement'] || outputsVisible['op-overdue-bar'] || outputsVisible['op-progress-status']) && (
-            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
-              {outputsVisible['op-weekly-movement'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>4. Weekly Movement Line Chart</h3>
-                <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={weeklyMovementData} margin={{ top: 14, right: 26, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="week" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 10 }} formatter={v => <span style={{ color: palette.muted, fontSize: 10 }}>{v}</span>} />
-                    <Line yAxisId="left" type="monotone" dataKey="avgProgress" name="Avg Progress %" stroke={SE.blue} strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                    <Line yAxisId="right" type="monotone" dataKey="completed" name="Completed Risks" stroke={SE.green} strokeWidth={2.4} dot={{ r: 3 }} />
-                    <Line yAxisId="right" type="monotone" dataKey="declined" name="Declined Risks" stroke={SE.red} strokeWidth={2.2} dot={{ r: 3 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>}
-
-              {/* Chart 5 — Overdue */}
-              {outputsVisible['op-overdue-bar'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>5. Overdue Mitigation Bar Chart</h3>
-                {overdueByOwnerData.length > 0 ? <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={overdueByOwnerData} layout="vertical" margin={{ top: 8, right: 38, left: 4, bottom: 6 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-                    <XAxis type="number" tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} domain={[0, Math.max(2, ...overdueByOwnerData.map(d => d.overdue)) + 1]} />
-                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={130} axisLine={false} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="overdue" name="Overdue Open Risks" fill={SE.orange} radius={[0, 8, 8, 0]} animationDuration={650} label={{ position: 'right', fontSize: 11, fontWeight: 900, fill: palette.text }} />
-                  </BarChart>
-                </ResponsiveContainer> : <div style={{ height: 220, display: 'grid', placeItems: 'center', color: SE.green, fontWeight: 900, fontSize: 13, textAlign: 'center' }}>No overdue open mitigations detected</div>}
-              </div>}
-
-              {/* Chart 6 — Risk Progress Status */}
-              {outputsVisible['op-progress-status'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>6. Risk Progress Status</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={progressData} margin={{ top: 14, right: 16, left: 0, bottom: 4 }} barCategoryGap="35%">
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="value" name="Risks" radius={[6, 6, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 13, fontWeight: 900, fill: palette.text }}>
-                      {progressData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={legendStyle}>{progressData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.fullName}</span>)}</div>
-              </div>}
-            </div>)}
-
-            {/* ── Step 3: New Charts Row — Monthly Threat / Radar / L×I Assessment ── */}
-            <div className="professional-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
-
-              {/* Monthly Threat Frequency by Category */}
+            {/* ═══ PROPOSAL ROW 4: Risk List (horizontal bars) | Mitigation Pipeline Funnel ═══ */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+              {/* Risk List — horizontal bars by owner */}
               <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Monthly Threat Frequency by Category</h3>
-                {monthlyThreatData.data.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={monthlyThreatData.data} margin={{ top: 10, right: 10, left: 0, bottom: 4 }} barCategoryGap="25%">
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                      <XAxis dataKey="week" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                      <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                      {monthlyThreatData.cats.map(cat => (
-                        <Bar key={cat} dataKey={cat} stackId="a" fill={monthlyThreatData.catColors[cat]} animationDuration={650} />
-                      ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{ height: 220, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No category data</div>
-                )}
-                <div style={legendStyle}>
-                  {monthlyThreatData.cats.map(cat => (
-                    <span key={cat} style={legendItem(palette)}>
-                      <span style={{ width: 9, height: 9, borderRadius: 3, background: monthlyThreatData.catColors[cat] }} />
-                      {cat.length > 16 ? cat.slice(0, 16) + '…' : cat}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Risk Score Radar by Category */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Risk Score Radar by Category</h3>
-                {radarData.length >= 3 ? (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <RadarChart cx="50%" cy="50%" outerRadius="72%" data={radarData}>
-                      <PolarGrid stroke={palette.chartGrid} />
-                      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} />
-                      <PolarRadiusAxis angle={30} domain={[0, 25]} tick={{ fontSize: 8, fill: palette.muted }} />
-                      <Radar name="Avg Score" dataKey="avgScore" stroke={SE.blue} fill={SE.blue} fillOpacity={0.28} strokeWidth={2} />
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{ height: 220, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>Need ≥3 categories</div>
-                )}
-                <div style={legendStyle}>
-                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.blue }} />Avg Risk Score</span>
-                </div>
-              </div>
-
-              {/* L×I Assessment Status Stacked Bar */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>L×I Assessment Status</h3>
-                {liAssessmentData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={liAssessmentData} layout="vertical" margin={{ top: 4, right: 20, left: 10, bottom: 4 }} barCategoryGap="20%">
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-                      <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                      <YAxis type="category" dataKey="key" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={52} axisLine={false} tickLine={false} />
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                      <Bar dataKey="notStarted" name="Not Started" stackId="s" fill={SE.red} animationDuration={650} />
-                      <Bar dataKey="inProgress" name="In Progress" stackId="s" fill={SE.gold} animationDuration={650} />
-                      <Bar dataKey="completed" name="Completed" stackId="s" fill={SE.green} radius={[0, 4, 4, 0]} animationDuration={650} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{ height: 220, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No L/I data</div>
-                )}
-                <div style={legendStyle}>
-                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.red }} />Not Started</span>
-                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.gold }} />In Progress</span>
-                  <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.green }} />Completed</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Residual Risk Distribution + Avg Inherent vs Residual Score */}
-            {residualData && (
-              <div style={{ ...chartBox(palette), marginBottom: 10 }}>
-                {/* Section title */}
-                <h3 style={{ ...chartTitle(palette), marginBottom: 10 }}>RESIDUAL RISK DISTRIBUTION</h3>
-
-                {/* Legend row */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 8, flexWrap: 'wrap' }}>
-                  {[
-                    { label: 'Very High', color: ZONE_COLORS['Very High'] },
-                    { label: 'High',      color: ZONE_COLORS.High },
-                    { label: 'Moderate',  color: ZONE_COLORS.Moderate },
-                    { label: 'Low',       color: ZONE_COLORS.Low },
-                  ].map(z => (
-                    <span key={z.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: palette.text }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: z.color, display: 'inline-block' }} />
-                      {z.label}
-                    </span>
-                  ))}
-                </div>
-
-                {/* Stacked proportion bar */}
-                {(() => {
-                  const zc = residualData.zoneCounts;
-                  const total = (zc.veryHigh + zc.high + zc.moderate + zc.low + zc.veryLow) || 1;
-                  const segments = [
-                    { key: 'veryHigh', color: ZONE_COLORS['Very High'], count: zc.veryHigh },
-                    { key: 'high',     color: ZONE_COLORS.High,         count: zc.high },
-                    { key: 'moderate', color: ZONE_COLORS.Moderate,     count: zc.moderate },
-                    { key: 'low',      color: ZONE_COLORS.Low,          count: zc.low },
-                    { key: 'veryLow',  color: ZONE_COLORS['Very Low'],   count: zc.veryLow },
-                  ].filter(s => s.count > 0);
-                  return (
-                    <div style={{ display: 'flex', height: 28, borderRadius: 8, overflow: 'hidden', width: '100%', marginBottom: 12 }}>
-                      {segments.map(s => (
-                        <div
-                          key={s.key}
-                          title={`${s.count} risk${s.count !== 1 ? 's' : ''}`}
-                          style={{
-                            flex: s.count / total,
-                            background: s.color,
-                            transition: 'flex 0.4s ease',
-                          }}
-                        />
-                      ))}
-                    </div>
-                  );
-                })()}
-
-                {/* Zone count tiles */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 16 }}>
-                  {[
-                    { label: 'Very High', color: ZONE_COLORS['Very High'], count: residualData.zoneCounts.veryHigh },
-                    { label: 'High',      color: ZONE_COLORS.High,         count: residualData.zoneCounts.high },
-                    { label: 'Moderate',  color: ZONE_COLORS.Moderate,     count: residualData.zoneCounts.moderate },
-                    { label: 'Low',       color: ZONE_COLORS.Low,          count: residualData.zoneCounts.low },
-                  ].map(z => (
-                    <div key={z.label} style={{
-                      background: palette.cardSoft,
-                      border: `1px solid ${palette.border}`,
-                      borderRadius: 10,
-                      padding: '10px 0',
-                      textAlign: 'center',
-                    }}>
-                      <div style={{ fontSize: 28, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, color: z.color, lineHeight: 1.1 }}>
-                        <AnimatedNumber value={z.count} />
-                      </div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: palette.muted, marginTop: 3 }}>{z.label}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Avg Inherent vs Residual Score */}
-                <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 12 }}>
-                  <h4 style={{ fontSize: 11, fontWeight: 900, letterSpacing: '0.08em', color: palette.muted, textTransform: 'uppercase', marginBottom: 10 }}>AVG INHERENT VS RESIDUAL SCORE</h4>
-                  {[
-                    { label: 'Inherent', value: residualData.avgInherentScore, max: 25, color: SE.red },
-                    { label: 'Residual', value: residualData.avgResidualScore, max: 25, color: SE.gold },
-                  ].map(row => (
-                    <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                      <span style={{ width: 68, fontSize: 11, fontWeight: 700, color: palette.text, flexShrink: 0 }}>{row.label}</span>
-                      <div style={{ flex: 1, height: 16, background: palette.cardSoft, borderRadius: 8, overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${Math.min(100, (row.value / row.max) * 100)}%`,
-                          height: '100%',
-                          background: row.color,
-                          borderRadius: 8,
-                          transition: 'width 0.5s ease',
-                        }} />
-                      </div>
-                      <span style={{ width: 36, textAlign: 'right', fontSize: 13, fontWeight: 900, color: row.color, flexShrink: 0 }}>
-                        {row.value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Row 3: Chart 7 + Mitigation Progress Detail */}
-            {(outputsVisible['op-owner-chart'] || outputsVisible['op-mitigation-detail']) && (
-            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
-              {/* Chart 7 */}
-              {outputsVisible['op-owner-chart'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>7. Risks by Owner</h3>
-                <ResponsiveContainer width="100%" height={Math.max(260, ownerHighRiskData.length * 38)}>
-                  <BarChart
-                    data={ownerHighRiskData}
-                    layout="vertical"
-                    margin={{ top: 8, right: 60, left: 4, bottom: 6 }}
-                    barCategoryGap="20%"
-                    barGap={3}
-                  >
+                <h3 style={chartTitle(palette)}>Risk List by Owner</h3>
+                <ResponsiveContainer width="100%" height={Math.max(240, ownerHighRiskData.length * 36)}>
+                  <BarChart data={ownerHighRiskData} layout="vertical" margin={{ top: 4, right: 50, left: 4, bottom: 4 }} barCategoryGap="20%" barGap={3}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
                     <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} domain={[0, 100]} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={130} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      content={({ active, payload, label }) => {
-                        if (!active || !payload?.length) return null;
-                        const d = ownerHighRiskData.find(o => o.owner === label);
-                        return (
-                          <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 11, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
-                            <div style={{ fontWeight: 700, color: palette.text, marginBottom: 4 }}>{d?.fullOwner || label}</div>
-                            {payload.map((p: any) => (
-                              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                                <span style={{ width: 8, height: 8, borderRadius: 2, background: p.fill, display: 'inline-block' }} />
-                                <span style={{ color: palette.muted }}>{p.name}:</span>
-                                <span style={{ fontWeight: 700, color: palette.text }}>{p.value}{p.name === 'Avg Progress %' ? '%' : ''}</span>
-                              </div>
-                            ))}
-                            {d && d.highCount > 0 && (
-                              <div style={{ marginTop: 4, fontSize: 10, color: SE.orange, fontWeight: 600 }}>⚠ {d.highCount} high-risk (score ≥15)</div>
-                            )}
-                          </div>
-                        );
-                      }}
-                    />
-                    <Bar dataKey="count" name="Risk Count" fill={SE.blue} radius={[0, 4, 4, 0]} barSize={10} animationDuration={650}
+                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={120} axisLine={false} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="count" name="Risk Count" fill={SE.blue} radius={[0,4,4,0]} barSize={9} animationDuration={650}
                       label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: SE.blue, formatter: (v: number) => v }}
                     />
-                    <Bar dataKey="avgPct" name="Avg Progress %" radius={[0, 4, 4, 0]} barSize={10} animationDuration={650}
+                    <Bar dataKey="avgPct" name="Avg Progress %" radius={[0,4,4,0]} barSize={9} animationDuration={650}
                       label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: palette.muted, formatter: (v: number) => `${v}%` }}
                     >
                       {ownerHighRiskData.map((entry, index) => (
@@ -1575,14 +1390,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-                <div style={legendStyle}>{[[SE.blue, 'Risk Count'], [SE.green, 'Avg Progress ≥80%'], [SE.gold, '50–79%'], [SE.red, '<50%']].map(([c, l]) => <span key={l} style={legendItem(palette)}><span style={{ width: 12, height: 7, background: c, borderRadius: 2 }} />{l}</span>)}</div>
-              </div>}
+                <div style={legendStyle}>{[[SE.blue,'Risk Count'],[SE.green,'Progress ≥80%'],[SE.gold,'50–79%'],[SE.red,'<50%']].map(([c,l])=><span key={l} style={legendItem(palette)}><span style={{width:12,height:7,background:c,borderRadius:2}}/>{l}</span>)}</div>
+              </div>
 
-              {outputsVisible['op-mitigation-detail'] && <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Mitigation Pipeline Funnel — {selectedWeek || period}</h3>
+              {/* Mitigation Pipeline Stages */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Mitigation Pipeline Stages — {selectedWeek || period}</h3>
                 <MitigationFunnelChart data={funnelData} palette={palette} />
-              </div>}
-            </div>)}
+              </div>
+            </div>
           </SectionCard>
 
           {/* ═══ Step 4: Compact KPI Strip + Horizontal Pipeline Funnel ═══ */}
