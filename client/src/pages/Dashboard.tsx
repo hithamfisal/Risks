@@ -8,7 +8,7 @@
  * - Sticky searchable risk register
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -927,200 +927,207 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
 
-      <div ref={dashboardRef} className="dashboard-shell" style={{ minHeight: '100vh', backgroundColor: palette.page, fontFamily: 'Inter, sans-serif', color: palette.text }}>
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* PROPOSAL-STYLE SHELL: dark top bar + left sidebar + scrollable content            */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      <div ref={dashboardRef} className="dashboard-shell" style={{ minHeight: '100vh', backgroundColor: palette.page, fontFamily: 'Inter, sans-serif', color: palette.text, display: 'flex', flexDirection: 'column' }}>
 
-        {/* ═══════════════ BANNER (above sticky header) ═══════════════ */}
-        <div style={{ width: '100%', background: 'linear-gradient(135deg, #020f2e 0%, #041a4a 40%, #0a1f5c 60%, #0d0a1e 100%)', position: 'relative', overflow: 'hidden', minHeight: 140, display: 'flex', alignItems: 'center', padding: '0 32px', gap: 24 }}>
-          <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 1200 140" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-            {Array.from({length: 18}).map((_,col) => Array.from({length: 5}).map((_,row) => (<circle key={`d-${col}-${row}`} cx={col*70+35} cy={row*30+15} r="1.2" fill="rgba(30,144,255,0.25)" />)))}
-            <line x1="0" y1="35" x2="340" y2="35" stroke="rgba(0,206,209,0.35)" strokeWidth="1" />
-            <line x1="0" y1="105" x2="280" y2="105" stroke="rgba(0,206,209,0.2)" strokeWidth="0.8" />
-            <line x1="860" y1="35" x2="1200" y2="35" stroke="rgba(192,57,43,0.3)" strokeWidth="1" />
-            <line x1="920" y1="105" x2="1200" y2="105" stroke="rgba(192,57,43,0.2)" strokeWidth="0.8" />
-            <path d="M-10,90 C60,50 120,130 200,80 C280,30 340,110 420,70" stroke="rgba(0,144,255,0.5)" strokeWidth="2" fill="none" />
-            <path d="M-10,110 C80,70 150,140 240,90 C320,45 380,120 460,80" stroke="rgba(0,206,209,0.3)" strokeWidth="1.2" fill="none" />
-            <path d="M780,70 C860,110 920,30 1000,80 C1080,130 1140,50 1210,90" stroke="rgba(192,57,43,0.5)" strokeWidth="2" fill="none" />
-            <path d="M820,90 C900,130 960,50 1040,100 C1110,140 1160,60 1210,110" stroke="rgba(192,57,43,0.25)" strokeWidth="1.2" fill="none" />
-            <circle cx="60" cy="35" r="4" fill="none" stroke="rgba(0,206,209,0.6)" strokeWidth="1.5" />
-            <circle cx="60" cy="35" r="1.5" fill="rgba(0,206,209,0.8)" />
-            <circle cx="1140" cy="35" r="4" fill="none" stroke="rgba(192,57,43,0.6)" strokeWidth="1.5" />
-            <circle cx="1140" cy="35" r="1.5" fill="rgba(192,57,43,0.8)" />
-            <rect x="490" y="95" width="8" height="30" rx="2" fill="rgba(0,144,255,0.3)" />
-            <rect x="502" y="80" width="8" height="45" rx="2" fill="rgba(0,144,255,0.45)" />
-            <rect x="514" y="88" width="8" height="37" rx="2" fill="rgba(0,144,255,0.3)" />
-            <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(0,206,209,0.2)" strokeWidth="12" strokeDasharray="28 84" />
-            <circle cx="700" cy="105" r="18" fill="none" stroke="rgba(255,165,0,0.3)" strokeWidth="12" strokeDasharray="22 90" strokeDashoffset="-28" />
-            <path d="M598,8 L602,8 L608,12 L608,22 C608,26 603,29 600,30 C597,29 592,26 592,22 L592,12 Z" fill="none" stroke="rgba(0,206,209,0.4)" strokeWidth="1.2" />
-            <path d="M596,20 L599,23 L605,16" stroke="rgba(0,206,209,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round" />
-          </svg>
-          <div style={{ position: 'absolute', left: '22%', top: '50%', transform: 'translate(-50%,-50%)', width: 320, height: 160, background: 'radial-gradient(ellipse, rgba(0,144,255,0.22) 0%, transparent 65%)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', right: '22%', top: '50%', transform: 'translate(50%,-50%)', width: 280, height: 140, background: 'radial-gradient(ellipse, rgba(192,57,43,0.18) 0%, transparent 65%)', pointerEvents: 'none' }} />
-          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
-            <img src="/assets/se-logo.png" alt="Saudi Energy" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+        {/* ───────────────────────────────────────────────────────────────────────────────────────────────────── */}
+        {/* TOP HEADER BAR — matches proposal: dark navy, logo left, title centre, controls right */}
+        {/* ───────────────────────────────────────────────────────────────────────────────────────────────────── */}
+        <header style={{
+          position: 'sticky', top: 0, zIndex: 100,
+          background: '#0b1120',
+          borderBottom: '1px solid rgba(255,255,255,0.07)',
+          height: 52,
+          display: 'flex', alignItems: 'center',
+          padding: '0 20px 0 0',
+          gap: 0,
+          boxShadow: '0 2px 16px rgba(0,0,0,0.45)',
+          flexShrink: 0,
+        }}>
+          {/* Logo block — same width as sidebar */}
+          <div style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, #0078FF, #00AEEF)', display: 'grid', placeItems: 'center' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            </div>
           </div>
-          <div style={{ flex: 1, textAlign: 'center', zIndex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Enterprise Risk Management Dashboard</div>
-            <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Telecom Network Operations Center</div>
+
+          {/* Title */}
+          <div style={{ flex: 1, padding: '0 20px', minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>ENTERPRISE RISK MANAGEMENT DASHBOARD</div>
           </div>
-          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
-            <img src="/assets/nasco-logo.png" alt="NASCO" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+
+          {/* Search bar */}
+          <div style={{ position: 'relative', flexShrink: 0, marginRight: 12 }}>
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.35)', pointerEvents: 'none' }} />
+            <input
+              placeholder="Search…"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '5px 12px 5px 30px', color: 'rgba(255,255,255,0.85)', fontSize: 11, fontFamily: 'Inter, sans-serif', outline: 'none', width: 180, height: 30 }}
+            />
           </div>
-        </div>
-        {/* ═══════════════════════════════════════════════════════════ */}
 
-        <header style={{ background: palette.header, borderBottom: `1px solid ${palette.border}`, position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(16px)', boxShadow: isDark ? '0 14px 44px rgba(0,0,0,.28)' : '0 12px 34px rgba(31,56,100,.10)' }}>
-          <div style={{ maxWidth: 1460, margin: '0 auto', padding: '6px 20px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', overflowX: 'auto' }}>
+          {/* Week selector */}
+          <div style={{ position: 'relative', flexShrink: 0, marginRight: 12 }}>
+            <select
+              value={selectedWeek || ''}
+              onChange={e => onWeekChange(e.target.value)}
+              style={{ appearance: 'none', WebkitAppearance: 'none', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '5px 28px 5px 12px', color: 'rgba(255,255,255,0.85)', fontSize: 11, fontFamily: 'DM Sans, Inter, sans-serif', fontWeight: 700, cursor: 'pointer', outline: 'none', height: 30 }}
+            >
+              {(weeks?.length > 0 ? weeks : [{ label: selectedWeek || 'Current', colIndex: 0 }]).map(w => <option key={w.label} value={w.label} style={{ background: '#0b1120', color: '#e0f2fe' }}>{w.label}</option>)}
+            </select>
+            <svg style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+          </div>
 
-            {/* File info — left */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginRight: 4 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: palette.text, whiteSpace: 'nowrap' }}>{fileName}</span>
-            </div>
+          {/* Theme toggle */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: 2, gap: 0, flexShrink: 0, height: 30, marginRight: 12 }}>
+            <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', height: 24, background: !isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: !isDark ? 'white' : 'rgba(255,255,255,0.4)' }} onClick={() => { if (isDark) toggleTheme?.(); }}><Sun size={11} />Light</button>
+            <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', height: 24, background: isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: isDark ? 'white' : 'rgba(255,255,255,0.4)' }} onClick={() => { if (!isDark) toggleTheme?.(); }}><Moon size={11} />Dark</button>
+          </div>
 
-            {/* Divider */}
-            <div style={{ width: 1, height: 20, background: palette.border, flexShrink: 0 }} />
+          {/* Action buttons */}
+          <button onClick={handlePrint} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: 'none', background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', padding: '0 14px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 6 }}><Printer size={12} />PDF</button>
+          <button onClick={() => exportElementAsPNG(dashboardRef, 'Risk_Full_Dashboard.png', bgForExport)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: 'none', background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', padding: '0 14px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 6 }}><ImageDown size={12} />PNG</button>
+          <button onClick={onReset} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.75)', fontWeight: 800, fontSize: 10, cursor: 'pointer', padding: '0 14px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 6 }}><Upload size={12} />New File</button>
 
-            {/* Week badge */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', fontSize: 11, fontWeight: 800, color: isDark ? '#e0f2fe' : '#0f172a', flexShrink: 0, whiteSpace: 'nowrap', backdropFilter: 'blur(8px)' }}>
-              <span style={{ color: isDark ? 'rgba(125,211,252,0.7)' : 'rgba(37,99,235,0.6)', fontWeight: 600, fontSize: 10 }}>Period:</span>
-              <span style={{ color: isDark ? '#38bdf8' : '#2563eb' }}>{selectedWeek}</span>
-              {prevWeekLabel && prevWeekLabel !== selectedWeek && <><span style={{ color: isDark ? 'rgba(125,211,252,0.5)' : 'rgba(37,99,235,0.4)', fontSize: 10 }}>vs</span><span style={{ color: isDark ? '#fbbf24' : '#d97706' }}>{prevWeekLabel}</span></>}
-            </div>
-
-            {/* Week dropdown */}
-            <div style={{ position: 'relative', flexShrink: 0 }}>
-              <select
-                value={selectedWeek || ''}
-                onChange={e => onWeekChange(e.target.value)}
-                style={{
-                  appearance: 'none',
-                  WebkitAppearance: 'none',
-                  background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)',
-                  border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)',
-                  borderRadius: 999,
-                  padding: '5px 28px 5px 12px',
-                  color: isDark ? '#e0f2fe' : '#0f172a',
-                  fontSize: 11,
-                  fontFamily: 'DM Sans, Inter, sans-serif',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  outline: 'none',
-                  height: 30,
-                  backdropFilter: 'blur(8px)',
-                  transition: 'border-color 180ms ease, background 180ms ease',
-                }}
-              >
-                {(weeks?.length > 0 ? weeks : [{ label: selectedWeek || 'Current', colIndex: 0 }]).map(w => <option key={w.label} value={w.label} style={{ background: isDark ? '#0f2040' : '#ffffff', color: isDark ? '#e0f2fe' : '#0f172a' }}>{w.label}</option>)}
-              </select>
-              <svg style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#7dd3fc' : '#2563eb'} strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
-            </div>
-
-            {/* Divider */}
-            <div style={{ width: 1, height: 20, background: palette.border, flexShrink: 0 }} />
-
-            {/* Nav scroll buttons */}
-            {['kpi-section', 'summary-section', 'charts-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section', 'bottom-register-section', 'sparkline-section'].map(id => (
-              <button key={id} type="button" onClick={() => scrollToSection(id)}
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', color: isDark ? '#e0f2fe' : '#0f172a', borderRadius: 999, padding: '5px 12px', fontSize: 10, fontWeight: 800, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', height: 30, fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
-                {id.includes('kpi') ? 'KPI' : id.includes('summary') ? 'Summary' : id.includes('charts') ? 'Charts' : id.includes('risk-register') ? 'Register' : id.includes('residual') ? 'Residual' : id.includes('overdue') ? 'Overdue' : id.includes('kri') ? 'KRI' : id.includes('heatmap') ? 'Heat Map' : id.includes('velocity') ? 'Velocity' : 'Taxonomy'}
-              </button>
-            ))}
-
-            {/* Divider */}
-            <div style={{ width: 1, height: 20, background: palette.border, flexShrink: 0 }} />
-
-            {/* Action buttons */}
-            {/* Ghost: Expand/Collapse */}
-            <button onClick={toggleAllSections}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
-              {allSectionsExpanded ? <EyeOff size={12} /> : <Eye size={12} />}
-              {allSectionsExpanded ? 'Collapse' : 'Expand'}
-            </button>
-
-            {/* Primary: PDF */}
-            <button onClick={handlePrint}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', border: 'none', borderRadius: 999, padding: '5px 14px', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', boxShadow: '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)', transition: 'transform 180ms ease, box-shadow 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 10px 26px rgba(37,99,235,0.40), inset 0 1px rgba(255,255,255,0.3)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)'; }}>
-              <Printer size={12} />PDF
-            </button>
-
-            {/* Primary: PNG */}
-            <button onClick={() => exportElementAsPNG(dashboardRef, 'Risk_Full_Dashboard.png', bgForExport)}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', border: 'none', borderRadius: 999, padding: '5px 14px', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', boxShadow: '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)', transition: 'transform 180ms ease, box-shadow 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 10px 26px rgba(37,99,235,0.40), inset 0 1px rgba(255,255,255,0.3)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 18px rgba(37,99,235,0.28), inset 0 1px rgba(255,255,255,0.3)'; }}>
-              <ImageDown size={12} />PNG
-            </button>
-
-            {/* Segmented pill theme toggle */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: 2, gap: 0, flexShrink: 0, backdropFilter: 'blur(8px)', height: 30 }}>
-              <button
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', transition: 'background 180ms ease, color 180ms ease, box-shadow 180ms ease', height: 24, background: !isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: !isDark ? 'white' : 'rgba(125,211,252,0.6)', boxShadow: !isDark ? '0 4px 12px rgba(37,99,235,0.30)' : 'none' }}
-                onClick={() => { if (isDark) toggleTheme?.(); }}>
-                <Sun size={11} />Light
-              </button>
-              <button
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, Inter, sans-serif', transition: 'background 180ms ease, color 180ms ease, box-shadow 180ms ease', height: 24, background: isDark ? 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)' : 'transparent', color: isDark ? 'white' : 'rgba(37,99,235,0.5)', boxShadow: isDark ? '0 4px 12px rgba(37,99,235,0.30)' : 'none' }}
-                onClick={() => { if (!isDark) toggleTheme?.(); }}>
-                <Moon size={11} />Dark
-              </button>
-            </div>
-
-            {/* Ghost: Home */}
-            <button onClick={onReset}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
-              <Home size={12} />Home
-            </button>
-
-            {/* Ghost: New File */}
-            <button onClick={onReset}
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: '5px 12px', color: isDark ? '#e0f2fe' : '#0f172a', fontWeight: 800, fontSize: 10, cursor: 'pointer', flexShrink: 0, height: 30, whiteSpace: 'nowrap', fontFamily: 'DM Sans, Inter, sans-serif', backdropFilter: 'blur(8px)', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(14,165,233,0.16)' : 'rgba(219,234,254,0.9)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.4)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'; (e.currentTarget as HTMLButtonElement).style.borderColor = isDark ? 'rgba(125,211,252,0.28)' : 'rgba(37,99,235,0.18)'; }}>
-              <Upload size={12} />New File
-            </button>
-
+          {/* User avatar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 4 }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', display: 'grid', placeItems: 'center', color: 'white', fontSize: 12, fontWeight: 900, fontFamily: 'DM Sans, sans-serif', flexShrink: 0 }}>U</div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.75)', whiteSpace: 'nowrap' }}>User Name</span>
           </div>
         </header>
 
-        <div className="dashboard-theme-stage" style={{ minHeight: 'calc(100vh - 65px)', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top', backgroundAttachment: 'fixed' }}>
-        <main style={{ maxWidth: 1460, margin: '0 auto', padding: '12px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* ───────────────────────────────────────────────────────────────────────────────────────────────────── */}
+        {/* BODY ROW: left sidebar + scrollable main content                                  */}
+        {/* ───────────────────────────────────────────────────────────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+
+          {/* LEFT SIDEBAR — icon-only, 52px, dark navy, sticky */}
+          <nav style={{
+            width: 52, flexShrink: 0,
+            background: '#0b1120',
+            borderRight: '1px solid rgba(255,255,255,0.07)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            paddingTop: 8, paddingBottom: 8, gap: 4,
+            position: 'sticky', top: 52, height: 'calc(100vh - 52px)',
+            overflowY: 'auto',
+          }}>
+            {([
+              { id: 'kpi-section',              icon: <Home size={18} />,          label: 'KPI' },
+              { id: 'charts-section',           icon: <BarChart2 size={18} />,     label: 'Charts' },
+              { id: 'pipeline-section',         icon: <TrendingUp size={18} />,    label: 'Pipeline' },
+              { id: 'risk-register-section',    icon: <Filter size={18} />,        label: 'Register' },
+              { id: 'risk-log-section',         icon: <Layers size={18} />,        label: 'Risk Log' },
+              { id: 'residual-analysis-section',icon: <Activity size={18} />,      label: 'Residual' },
+              { id: 'overdue-section',          icon: <AlertTriangle size={18} />, label: 'Overdue' },
+              { id: 'kri-section',              icon: <Target size={18} />,        label: 'KRI' },
+              { id: 'velocity-section',         icon: <TrendingDown size={18} />,  label: 'Velocity' },
+              { id: 'taxonomy-section',         icon: <Layers size={18} />,        label: 'Taxonomy' },
+              { id: 'sparkline-section',        icon: <TrendingUp size={18} />,    label: 'Progression' },
+            ] as { id: string; icon: React.ReactNode; label: string }[]).map(item => (
+              <button
+                key={item.id}
+                title={item.label}
+                onClick={() => scrollToSection(item.id)}
+                style={{
+                  width: 38, height: 38, borderRadius: 10,
+                  display: 'grid', placeItems: 'center',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.45)',
+                  cursor: 'pointer',
+                  transition: 'background 150ms ease, color 150ms ease',
+                  flexShrink: 0,
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(59,130,246,0.18)'; (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.45)'; }}
+              >
+                {item.icon}
+              </button>
+            ))}
+
+            {/* Spacer */}
+            <div style={{ flex: 1 }} />
+
+            {/* Bottom actions */}
+            <button title="Expand / Collapse All" onClick={toggleAllSections} style={{ width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.35)', cursor: 'pointer' }}>
+              {allSectionsExpanded ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+            <button title="Upload New File" onClick={onReset} style={{ width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.35)', cursor: 'pointer' }}>
+              <Upload size={17} />
+            </button>
+          </nav>
+
+          {/* MAIN SCROLLABLE CONTENT */}
+          <div className="dashboard-theme-stage" style={{ flex: 1, minWidth: 0, overflowY: 'auto', backgroundImage: `${isDark ? 'linear-gradient(180deg, rgba(2,6,23,.70), rgba(2,6,23,.78))' : 'linear-gradient(180deg, rgba(248,251,255,.78), rgba(248,251,255,.90))'}, url(${themeBg})`, backgroundSize: 'cover', backgroundPosition: 'center top' }}>
+          <main style={{ padding: '12px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
 
 
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
-            {/* ── Primary 5-tile KPI row (orb style) ── */}
-            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 9 }}>
-              <KpiTile label="Total Risks" value={normalizedKpis.totalRisks} color={SE.navy} selectedWeek={selectedWeek} index={0} palette={palette} />
-              <KpiTile label="Active Threats" value={zoneCounts.veryHigh + zoneCounts.high} color={SE.red} selectedWeek={selectedWeek} index={1} palette={palette} />
-              <KpiTile label="High Severity" value={zoneCounts.veryHigh} color={SE.orange} selectedWeek={selectedWeek} index={2} palette={palette} />
-              <KpiTile label="Overdue Actions" value={professionalSummary.overdue} color={SE.gold} selectedWeek={selectedWeek} index={3} palette={palette} />
-              <KpiTile label="Overall Risk Health" value={normalizedKpis.aboveTarget && normalizedKpis.totalRisks ? Math.round((normalizedKpis.aboveTarget / normalizedKpis.totalRisks) * 100) : 0} color={SE.green} selectedWeek={selectedWeek} index={4} palette={palette} />
+
+            {/* ── ROW 1: 5 large orb KPI tiles matching proposal ── */}
+            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
+              {[
+                { label: 'Total Risks',        value: normalizedKpis.totalRisks,                                                                                                                    color: SE.blue,   icon: <Layers size={22} />,        sub: `${selectedWeek}` },
+                { label: 'Active Threats',     value: zoneCounts.veryHigh + zoneCounts.high,                                                                                                        color: SE.red,    icon: <AlertTriangle size={22} />,  sub: 'High + Very High' },
+                { label: 'High Severity',      value: zoneCounts.veryHigh,                                                                                                                          color: SE.orange, icon: <Activity size={22} />,       sub: 'Very High zone' },
+                { label: 'Overdue Actions',    value: professionalSummary.overdue,                                                                                                                  color: '#eab308', icon: <Target size={22} />,          sub: 'Past closing date' },
+                { label: 'Overall Risk Health',value: normalizedKpis.aboveTarget && normalizedKpis.totalRisks ? Math.round((normalizedKpis.aboveTarget / normalizedKpis.totalRisks) * 100) : 0,    color: SE.green,  icon: <TrendingUp size={22} />,     sub: `${normalizedKpis.aboveTarget ?? 0} of ${normalizedKpis.totalRisks ?? 0} on target`, isPercent: true },
+              ].map((card, i) => (
+                <div key={card.label} style={{
+                  background: isDark ? 'rgba(7,24,54,0.88)' : 'rgba(255,255,255,0.92)',
+                  border: `1px solid ${card.color}44`,
+                  borderRadius: 16,
+                  padding: '18px 16px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 10,
+                  position: 'relative',
+                  overflow: 'hidden',
+                  minHeight: 160,
+                  boxShadow: `0 4px 24px ${card.color}22`,
+                }}>
+                  {/* Colored top accent bar */}
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: card.color, borderRadius: '16px 16px 0 0' }} />
+                  {/* Icon circle */}
+                  <div style={{ width: 52, height: 52, borderRadius: '50%', background: `${card.color}22`, border: `2px solid ${card.color}55`, display: 'grid', placeItems: 'center', color: card.color }}>
+                    {card.icon}
+                  </div>
+                  {/* Value */}
+                  <div style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: 38, lineHeight: 1, color: card.color, letterSpacing: '-0.04em' }}>
+                    <AnimatedNumber value={Number(card.value)} animationKey={`kpi-${selectedWeek}-${i}`} />{card.isPercent ? '%' : ''}
+                  </div>
+                  {/* Label */}
+                  <div style={{ color: palette.text, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em', textAlign: 'center', lineHeight: 1.3 }}>{card.label}</div>
+                  {/* Sub text */}
+                  <div style={{ color: palette.muted, fontSize: 9.5, textAlign: 'center', lineHeight: 1.4 }}>{card.sub}</div>
+                </div>
+              ))}
             </div>
 
-            {/* ── Secondary detail row (flat cards) ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 9, marginTop: 10 }}>
+            {/* ── ROW 2: 5 flat detail cards ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10, marginTop: 10 }}>
               {[
-                { label: 'Total Risks', value: normalizedKpis.totalRisks, sub: `${selectedWeek}`, color: SE.navy, icon: <Layers size={15} /> },
-                { label: 'Active Threats', value: zoneCounts.veryHigh + zoneCounts.high, sub: 'High + Very High', color: SE.red, icon: <AlertTriangle size={15} /> },
-                { label: 'High Severity', value: zoneCounts.veryHigh, sub: 'Very High zone', color: SE.orange, icon: <Activity size={15} /> },
-                { label: 'Overdue Actions', value: professionalSummary.overdue, sub: 'Past closing date', color: SE.gold, icon: <Target size={15} /> },
-                { label: 'Overall Risk Health', value: `${normalizedKpis.aboveTarget && normalizedKpis.totalRisks ? Math.round((normalizedKpis.aboveTarget / normalizedKpis.totalRisks) * 100) : 0}%`, sub: `${normalizedKpis.aboveTarget} of ${normalizedKpis.totalRisks} on target`, color: SE.green, icon: <TrendingUp size={15} />, isText: true },
-              ].map(card => (
-                <div key={card.label} style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center', minHeight: 68 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 11, display: 'grid', placeItems: 'center', background: `${card.color}22`, border: `1.5px solid ${card.color}55`, color: card.color, flexShrink: 0 }}>{card.icon}</div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ color: card.color, fontFamily: 'DM Sans, sans-serif', fontSize: 22, lineHeight: 1, fontWeight: 950 }}>
-                      {card.isText ? card.value : <AnimatedNumber value={Number(card.value)} animationKey={`detail-${selectedWeek}-${card.label}`} />}
+                { label: 'Total Risks',        value: normalizedKpis.totalRisks,                                                                                                                    sub: `${selectedWeek}`,                                                                                                                color: SE.blue,   icon: <Layers size={14} />,        tag: 'Total Risks' },
+                { label: 'Active Threats',     value: zoneCounts.veryHigh + zoneCounts.high,                                                                                                        sub: 'Active Threats',                                                                                                                 color: SE.red,    icon: <AlertTriangle size={14} />,  tag: 'Active Threats' },
+                { label: 'High Severity',      value: zoneCounts.veryHigh,                                                                                                                          sub: 'Overdue activity',                                                                                                               color: SE.orange, icon: <Activity size={14} />,       tag: 'High Severity' },
+                { label: 'Overdue Actions',    value: professionalSummary.overdue,                                                                                                                  sub: 'Timelines',                                                                                                                      color: '#eab308', icon: <Target size={14} />,          tag: 'Overdue Actions' },
+                { label: 'Overall Risk Health',value: normalizedKpis.aboveTarget && normalizedKpis.totalRisks ? Math.round((normalizedKpis.aboveTarget / normalizedKpis.totalRisks) * 100) : 0,    sub: `${normalizedKpis.aboveTarget ?? 0} of ${normalizedKpis.totalRisks ?? 0} Risks (TTL)`,                                           color: SE.green,  icon: <TrendingUp size={14} />,     tag: 'Risk Health', isPercent: true },
+              ].map((card, i) => (
+                <div key={`detail-${card.label}`} style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 12, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, minHeight: 64 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 9, display: 'grid', placeItems: 'center', background: `${card.color}22`, border: `1.5px solid ${card.color}55`, color: card.color, flexShrink: 0 }}>{card.icon}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                      <span style={{ color: card.color, fontFamily: 'DM Sans, sans-serif', fontSize: 24, lineHeight: 1, fontWeight: 950 }}>
+                        <AnimatedNumber value={Number(card.value)} animationKey={`det-${selectedWeek}-${i}`} />{card.isPercent ? '%' : ''}
+                      </span>
                     </div>
-                    <div style={{ color: palette.text, fontSize: 10, fontWeight: 900, marginTop: 3, textTransform: 'uppercase', letterSpacing: '.04em' }}>{card.label}</div>
-                    <div style={{ color: palette.muted, fontSize: 9.5, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.sub}</div>
+                    <div style={{ color: palette.text, fontSize: 10, fontWeight: 800, marginTop: 2, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.tag}</div>
+                    <div style={{ color: palette.muted, fontSize: 9, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.sub}</div>
                   </div>
                 </div>
               ))}
@@ -2181,8 +2188,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
           <footer style={{ textAlign: 'center', fontSize: 10, color: palette.muted, padding: '3px 0 10px' }}>Risk Management Dashboard · {period} · Click any risk row to update selected risk detail</footer>
         </main>
-        </div>
-      </div>
+          </div>{/* end dashboard-theme-stage */}
+        </div>{/* end body row */}
+      </div>{/* end dashboard-shell */}
     </>
   );
 }
