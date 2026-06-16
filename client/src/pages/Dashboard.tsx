@@ -270,6 +270,40 @@ function riskIsOverdue(risk: RiskRow): boolean {
   return due !== null && due < Date.now();
 }
 
+
+function riskSeverityRank(risk: RiskRow): number {
+  const rating = (risk.rating || '').toLowerCase();
+  if (rating.includes('very high') || risk.score >= 20) return 5;
+  if (rating.includes('high') || risk.score >= 15) return 4;
+  if (rating.includes('moderate') || risk.score >= 9) return 3;
+  if (rating.includes('low') || risk.score >= 5) return 2;
+  return 1;
+}
+
+function riskRatingLabelFromScore(score: number): string {
+  if (score >= 20) return 'Very High';
+  if (score >= 15) return 'High';
+  if (score >= 9) return 'Moderate';
+  if (score >= 5) return 'Low';
+  return 'Very Low';
+}
+
+function getOverdueDays(risk: RiskRow): number {
+  if (!riskIsOverdue(risk)) return 0;
+  const due = getDateValue(risk.closingDate || '');
+  if (due === null) return 0;
+  return Math.max(1, Math.floor((Date.now() - due) / 86400000));
+}
+
+function getOverdueBucket(risk: RiskRow): string {
+  const days = getOverdueDays(risk);
+  if (!days) return 'On Track';
+  if (days > 90) return 'Overdue >90 Days';
+  if (days > 60) return 'Overdue 61–90 Days';
+  if (days > 30) return 'Overdue 31–60 Days';
+  return 'Overdue 1–30 Days';
+}
+
 function sortDateLabels(values: string[]): string[] {
   return [...values].sort((a, b) => {
     const da = getDateValue(a);
@@ -555,9 +589,13 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const [filterCategory, setFilterCategory] = useState('All');
   const [filterRiskType, setFilterRiskType] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [matrixFilter, setMatrixFilter] = useState<{ likelihood: number; impact: number } | null>(null);
   const [registerPage, setRegisterPage] = useState(1);
   const [residualPage, setResidualPage] = useState(1);
   const [velocityPage, setVelocityPage] = useState(1);
+  const [riskLogPage, setRiskLogPage] = useState(1);
+  const [overduePage, setOverduePage] = useState(1);
+  const [kriPage, setKriPage] = useState(1);
   const [residualFilterRating, setResidualFilterRating] = useState('All');
   const [residualFilterStatus, setResidualFilterStatus] = useState('All');
 
@@ -652,10 +690,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       if (filterTrackStatus === 'In Track' && overdue) return false;
       if (filterCategory !== 'All' && category !== filterCategory) return false;
       if (filterRiskType !== 'All' && riskType !== filterRiskType) return false;
+      if (matrixFilter && (Math.round(r.likelihood || 0) !== matrixFilter.likelihood || Math.round(r.impact || 0) !== matrixFilter.impact)) return false;
       if (q && !normalise(`${r.title} ${r.mitigation} ${r.owner} ${r.rating} ${r.closingDate} ${category} ${riskType} ${r.progressStatus}`).includes(q)) return false;
       return true;
     });
-  }, [riskRegister, filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, searchTerm]);
+  }, [riskRegister, filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm]);
 
   const filteredZoneCounts = useMemo(() => ({
     veryHigh: filteredRisks.filter(r => r.score >= 20 || /very high/i.test(r.rating)).length,
@@ -672,13 +711,16 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   const filteredOverallHealth = filteredRisks.length ? Math.round((filteredRisks.filter(r => r.aboveTarget).length / filteredRisks.length) * 100) : 0;
 
-  const hasFilters = filterRating !== 'All' || filterOwner !== 'All' || filterStatus !== 'All' || filterClosingDate !== 'All' || filterTarget !== 'All' || filterTrackStatus !== 'All' || filterCategory !== 'All' || filterRiskType !== 'All' || searchTerm.trim().length > 0;
+  const hasFilters = filterRating !== 'All' || filterOwner !== 'All' || filterStatus !== 'All' || filterClosingDate !== 'All' || filterTarget !== 'All' || filterTrackStatus !== 'All' || filterCategory !== 'All' || filterRiskType !== 'All' || matrixFilter !== null || searchTerm.trim().length > 0;
 
   useEffect(() => {
     setRegisterPage(1);
     setResidualPage(1);
     setVelocityPage(1);
-  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, searchTerm, selectedWeek]);
+    setRiskLogPage(1);
+    setOverduePage(1);
+    setKriPage(1);
+  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm, selectedWeek]);
 
   useEffect(() => {
     if (!filteredRisks.length) {
@@ -717,6 +759,62 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     const completedPct = filteredRisks.length ? Math.round((completed / filteredRisks.length) * 100) : 0;
     return { overdue, completed, completedPct, highRiskOwner: topOwner, highRiskOwnerCount: topOwnerCount, highRiskTotal: highRisks.length };
   }, [filteredRisks]);
+
+
+  const filteredAvgRiskScore = useMemo(() => {
+    const scored = filteredRisks.filter(r => r.score > 0);
+    return scored.length ? Math.round((scored.reduce((sum, r) => sum + r.score, 0) / scored.length) * 10) / 10 : 0;
+  }, [filteredRisks]);
+
+  const overallRiskRating = useMemo(() => {
+    if (filteredZoneCounts.veryHigh > 0 || filteredAvgRiskScore >= 20) return 'Very High';
+    if (filteredZoneCounts.high > 0 || filteredAvgRiskScore >= 15) return 'High';
+    if (filteredZoneCounts.moderate > 0 || filteredAvgRiskScore >= 9) return 'Moderate';
+    if (filteredRisks.length === 0) return 'No Data';
+    return 'Low';
+  }, [filteredZoneCounts, filteredAvgRiskScore, filteredRisks.length]);
+
+  const overallRiskColor = overallRiskRating === 'Very High' ? SE.red : overallRiskRating === 'High' ? SE.orange : overallRiskRating === 'Moderate' ? SE.gold : overallRiskRating === 'No Data' ? palette.muted : SE.green;
+
+  const overdueAging = useMemo(() => filteredRisks.reduce((acc, risk) => {
+    const bucket = getOverdueBucket(risk);
+    if (bucket === 'Overdue >90 Days') acc.gt90 += 1;
+    else if (bucket === 'Overdue 61–90 Days') acc.d61to90 += 1;
+    else if (bucket === 'Overdue 31–60 Days') acc.d31to60 += 1;
+    else if (bucket === 'Overdue 1–30 Days') acc.d1to30 += 1;
+    return acc;
+  }, { gt90: 0, d61to90: 0, d31to60: 0, d1to30: 0 }), [filteredRisks]);
+
+  const riskRatingDistributionData = useMemo(() => [
+    { name: 'Very High', value: filteredZoneCounts.veryHigh, color: ZONE_COLORS['Very High'] },
+    { name: 'High', value: filteredZoneCounts.high, color: ZONE_COLORS.High },
+    { name: 'Moderate', value: filteredZoneCounts.moderate, color: ZONE_COLORS.Moderate },
+    { name: 'Low', value: filteredZoneCounts.low, color: ZONE_COLORS.Low },
+    { name: 'Very Low', value: filteredZoneCounts.veryLow, color: ZONE_COLORS['Very Low'] },
+  ].filter(item => item.value > 0), [filteredZoneCounts]);
+
+  const overdueAgingChartData = useMemo(() => [
+    { bucket: '1–30 Days', count: overdueAging.d1to30, color: SE.gold },
+    { bucket: '31–60 Days', count: overdueAging.d31to60, color: SE.orange },
+    { bucket: '61–90 Days', count: overdueAging.d61to90, color: '#ef4444' },
+    { bucket: '>90 Days', count: overdueAging.gt90, color: SE.red },
+  ], [overdueAging]);
+
+  const actionStatusData = useMemo(() => [
+    { name: 'Completed', value: filteredRisks.filter(r => r.currentPct >= 100 || r.progressStatus === 'Completed (100%)').length, color: SE.green },
+    { name: 'In Progress', value: filteredRisks.filter(r => r.currentPct > 0 && r.currentPct < 100).length, color: SE.gold },
+    { name: 'Not Started', value: filteredRisks.filter(r => r.currentPct <= 0).length, color: SE.red },
+  ].filter(item => item.value > 0), [filteredRisks]);
+
+  const topCriticalRisks = useMemo(() => [...filteredRisks]
+    .sort((a, b) => {
+      const severityDiff = riskSeverityRank(b) - riskSeverityRank(a);
+      if (severityDiff !== 0) return severityDiff;
+      const residualDiff = (b.residualScore || b.score) - (a.residualScore || a.score);
+      if (residualDiff !== 0) return residualDiff;
+      return getOverdueDays(b) - getOverdueDays(a);
+    })
+    .slice(0, 10), [filteredRisks]);
 
   const weeklyMovementData = useMemo(() => weeks.map((w, index) => {
     const values = filteredRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
@@ -780,9 +878,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   }, [filteredRisks]);
 
   const selectedChartData = activeRisk ? [
-    { name: 'Current %', value: activeRisk.currentPct, color: SE.green },
-    { name: 'Before %', value: activeRisk.beforePct, color: SE.gold },
-    { name: 'Development %', value: Math.abs(activeRisk.developmentPct), color: activeRisk.developmentPct >= 0 ? SE.blue : SE.red },
+    { name: 'Current', value: activeRisk.currentPct, color: SE.green },
+    { name: 'Before', value: activeRisk.beforePct, color: SE.gold },
+    { name: 'Development', value: Math.abs(activeRisk.developmentPct), color: activeRisk.developmentPct >= 0 ? SE.blue : SE.red },
   ] : [];
 
   const selectStyle: CSSProperties = {
@@ -812,6 +910,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     setFilterCategory('All');
     setFilterRiskType('All');
     setSearchTerm('');
+    setMatrixFilter(null);
   }, []);
 
   const handlePrint = useCallback(() => {
@@ -964,6 +1063,40 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     });
   }, [filteredRisks, riskLogTab, riskLogSearch]);
 
+  useEffect(() => {
+    setRiskLogPage(1);
+  }, [riskLogTab, riskLogSearch, filteredRisks]);
+
+  const riskLogTotalPages = Math.max(1, Math.ceil(riskLogFiltered.length / PAGE_SIZE));
+  const safeRiskLogPage = Math.min(riskLogPage, riskLogTotalPages);
+  const riskLogStartIndex = (safeRiskLogPage - 1) * PAGE_SIZE;
+  const pagedRiskLogRisks = riskLogFiltered.slice(riskLogStartIndex, riskLogStartIndex + PAGE_SIZE);
+
+  const overdueFilteredItems = useMemo(() => filteredRisks
+    .filter(riskIsOverdue)
+    .map(r => ({
+      riskTitle: r.title,
+      owner: r.owner || '–',
+      closingDate: r.closingDate || '–',
+      progressStatus: r.progressStatus || '–',
+      currentPct: r.currentPct || 0,
+    })), [filteredRisks]);
+  const overdueTotalPages = Math.max(1, Math.ceil(overdueFilteredItems.length / PAGE_SIZE));
+  const safeOverduePage = Math.min(overduePage, overdueTotalPages);
+  const overdueStartIndex = (safeOverduePage - 1) * PAGE_SIZE;
+  const pagedOverdueItems = overdueFilteredItems.slice(overdueStartIndex, overdueStartIndex + PAGE_SIZE);
+
+  const kriFilteredItems = useMemo(() => {
+    const allItems = kriData?.items ?? [];
+    if (!hasFilters) return allItems;
+    const allowedTitles = new Set(filteredRisks.map(r => normalise(r.title)));
+    return allItems.filter(item => allowedTitles.has(normalise(item.riskTitle || '')));
+  }, [kriData, filteredRisks, hasFilters]);
+  const kriTotalPages = Math.max(1, Math.ceil(kriFilteredItems.length / PAGE_SIZE));
+  const safeKriPage = Math.min(kriPage, kriTotalPages);
+  const kriStartIndex = (safeKriPage - 1) * PAGE_SIZE;
+  const pagedKriItems = kriFilteredItems.slice(kriStartIndex, kriStartIndex + PAGE_SIZE);
+
   // ── Bottom 4-tab register state (Step 8) ─────────────────────────────────
   const [bottomTab, setBottomTab] = useState<'all' | 'high' | 'overdue' | 'search'>('all');
   const [bottomSearch, setBottomSearch] = useState('');
@@ -1059,9 +1192,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </div>
 
-          {/* Title */}
-          <div style={{ flex: 1, padding: '0 20px', minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>ENTERPRISE RISK MANAGEMENT DASHBOARD</div>
+          {/* Title + executive risk posture badge */}
+          <div style={{ flex: 1, padding: '0 20px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>ENTERPRISE RISK MANAGEMENT DASHBOARD</div>
+              <div style={{ fontSize: 10, fontWeight: 750, color: 'rgba(255,255,255,.56)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Reporting Period: {selectedWeek || period}</div>
+            </div>
+            <span title="Overall risk rating from filtered dataset" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, borderRadius: 999, padding: '0 10px', background: `${overallRiskColor}22`, border: `1px solid ${overallRiskColor}`, color: overallRiskColor, fontSize: 10, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              <AlertTriangle size={12} /> Overall Risk Rating: {overallRiskRating}
+            </span>
           </div>
 
           {/* Search bar */}
@@ -1203,6 +1342,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             <select value={filterTrackStatus} onChange={e => setFilterTrackStatus(e.target.value)} style={selectStyle}>{trackOptions.map(t => <option key={t} value={t}>{t === 'All' ? 'Overdue + In Track' : t}</option>)}</select>
             <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} style={selectStyle}>{uniqueCategories.map(c => <option key={c} value={c}>{c === 'All' ? 'All Risk Categories' : c}</option>)}</select>
             <select value={filterRiskType} onChange={e => setFilterRiskType(e.target.value)} style={selectStyle}>{uniqueRiskTypes.map(t => <option key={t} value={t}>{t === 'All' ? 'All Risk Types' : t}</option>)}</select>
+            {matrixFilter && (
+              <button type="button" onClick={() => setMatrixFilter(null)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${SE.blue}`, borderRadius: 999, background: 'rgba(0,120,255,.14)', color: SE.blue, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 900, cursor: 'pointer' }}>
+                Matrix L{matrixFilter.likelihood} × I{matrixFilter.impact} <X size={12} />
+              </button>
+            )}
             {hasFilters && <button onClick={resetFilters} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.border}`, borderRadius: 999, background: palette.cardSolid, color: palette.text, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}><RotateCcw size={12} />Clear</button>}
             <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 850, whiteSpace: 'nowrap' }}>Filtered {filteredRisks.length} of {riskRegister.length}</span>
           </div>
@@ -1214,14 +1358,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
 
             {/* ── ROW 1: large circular KPI cards with the rectangular-version icons ── */}
-            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(180px, 1fr))', gap: 14, alignItems: 'center' }}>
+            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(158px, 1fr))', gap: 12, alignItems: 'center' }}>
               {[
-                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={24} />, sub: `${selectedWeek}` },
-                { label: 'Active Threats', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={24} />, sub: 'High + Very High' },
-                { label: 'High Severity', value: filteredZoneCounts.veryHigh, color: SE.orange, icon: <Activity size={24} />, sub: 'Very High zone' },
-                { label: 'Overdue', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={24} />, sub: 'Past closing date' },
+                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={24} />, sub: `${selectedWeek || period}` },
+                { label: 'Very High / High', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={24} />, sub: `${filteredZoneCounts.veryHigh} VH · ${filteredZoneCounts.high} H` },
+                { label: 'Moderate Risks', value: filteredZoneCounts.moderate, color: SE.gold, icon: <Activity size={24} />, sub: 'Requires monitoring' },
+                { label: 'Low Risks', value: filteredZoneCounts.low + filteredZoneCounts.veryLow, color: SE.green, icon: <TrendingDown size={24} />, sub: `${filteredZoneCounts.low} Low · ${filteredZoneCounts.veryLow} VL` },
+                { label: 'Overdue Actions', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={24} />, sub: `>90:${overdueAging.gt90} · 61-90:${overdueAging.d61to90} · 1-30:${overdueAging.d1to30}` },
+                { label: 'Below Target', value: filteredRisks.filter(r => r.belowTarget).length, color: SE.orange, icon: <TrendingDown size={24} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} above target` },
                 { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={24} />, sub: 'Filtered action count' },
-                { label: 'Overall Risk Health', value: filteredOverallHealth, color: SE.green, icon: <TrendingUp size={24} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} of ${filteredRisks.length} on target`, isPercent: true },
               ].map((card, i) => (
                 <KpiTile
                   key={card.label}
@@ -1241,13 +1386,60 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           </SectionCard>
 
 
-          <SectionCard id="overview-focus-section" title="Executive Focus" palette={palette} compact open={true} onOpenChange={() => undefined}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 10 }}>
-              <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 950, color: palette.text, marginBottom: 6 }}>Overview is now for the 5-second executive answer.</div>
-                <div style={{ fontSize: 11, lineHeight: 1.65, color: palette.muted }}>Only the executive KPI strip remains here. All charts, matrix analysis, trend charts, department comparisons, and mitigation performance visuals are grouped under the Analytics tab.</div>
+          <SectionCard id="overview-focus-section" title="Executive Focus — Heatmap + Top 10 Critical Risks" palette={palette} compact open={true} onOpenChange={() => undefined}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12, alignItems: 'stretch' }}>
+              <div style={{ ...chartBox(palette), minHeight: 420 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+                  <div>
+                    <h3 style={chartTitle(palette)}>Risk Matrix Heatmap</h3>
+                    <div style={{ fontSize: 10.5, color: palette.muted, fontWeight: 750 }}>Click any populated cell to filter the dashboard by likelihood × impact.</div>
+                  </div>
+                  {matrixFilter && <button type="button" onClick={() => setMatrixFilter(null)} style={{ border: `1px solid ${SE.blue}`, background: 'rgba(0,120,255,.13)', color: SE.blue, borderRadius: 999, height: 28, padding: '0 10px', fontSize: 10, fontWeight: 900, cursor: 'pointer' }}>Clear Matrix Filter</button>}
+                </div>
+                <RiskHeatMap risks={filteredRisks} palette={palette} isDark={isDark} selectedCell={matrixFilter} onCellSelect={cell => setMatrixFilter(prev => prev?.likelihood === cell.likelihood && prev?.impact === cell.impact ? null : { likelihood: cell.likelihood, impact: cell.impact })} />
               </div>
-              <button type="button" onClick={() => setActiveMainTab('analytics')} style={{ background: 'linear-gradient(135deg, #0078FF 0%, #00AEEF 100%)', color: '#fff', border: 'none', borderRadius: 14, cursor: 'pointer', fontSize: 12, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', padding: 14, minHeight: 86 }}>Open Analytics Charts →</button>
+
+              <div style={{ ...chartBox(palette), minHeight: 420, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                  <h3 style={chartTitle(palette)}>Top 10 Critical Risks</h3>
+                  <span style={{ fontSize: 10, fontWeight: 900, color: overallRiskColor, background: `${overallRiskColor}18`, border: `1px solid ${overallRiskColor}`, borderRadius: 999, padding: '3px 9px' }}>{overallRiskRating}</span>
+                </div>
+                <div style={{ border: `1px solid ${palette.border}`, borderRadius: 12, overflow: 'hidden', flex: 1 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 10.5 }}>
+                    <thead>
+                      <tr style={{ background: palette.tableHead, color: '#fff' }}>
+                        {['Risk', 'Category', 'Rating', 'Residual', 'Owner', 'Overdue'].map((h, i) => <th key={h} style={{ padding: '7px 8px', textAlign: i === 3 ? 'center' : 'left', fontWeight: 950, fontSize: 9.5, whiteSpace: 'nowrap' }}>{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topCriticalRisks.length === 0 ? (
+                        <tr><td colSpan={6} style={{ padding: 18, color: palette.muted, textAlign: 'center' }}>No matching risks</td></tr>
+                      ) : topCriticalRisks.map((r, i) => {
+                        const overdueBucket = getOverdueBucket(r);
+                        const ratingColor = getRatingColor(r.rating || riskRatingLabelFromScore(r.score));
+                        return (
+                          <tr key={r.id || i} onClick={() => setActiveRisk(r)} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}`, cursor: 'pointer' }}>
+                            <td style={{ padding: '7px 8px', color: palette.text, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</td>
+                            <td style={{ padding: '7px 8px', color: palette.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.category || '–'}</td>
+                            <td style={{ padding: '7px 8px' }}><span style={{ color: ratingColor, background: `${ratingColor}1f`, border: `1px solid ${ratingColor}`, borderRadius: 999, padding: '2px 7px', fontSize: 9, fontWeight: 900, whiteSpace: 'nowrap' }}>{r.rating || riskRatingLabelFromScore(r.score)}</span></td>
+                            <td style={{ padding: '7px 8px', color: getScoreColor(r.residualScore || r.score), textAlign: 'center', fontWeight: 950 }}>{r.residualScore || r.score}</td>
+                            <td style={{ padding: '7px 8px', color: SE.cyan, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.owner || '–'}</td>
+                            <td style={{ padding: '7px 8px', color: overdueBucket === 'On Track' ? SE.green : SE.red, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{overdueBucket}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 10 }}>
+                  {[
+                    ['1–30', overdueAging.d1to30, SE.gold],
+                    ['31–60', overdueAging.d31to60, SE.orange],
+                    ['61–90', overdueAging.d61to90, '#ef4444'],
+                    ['>90', overdueAging.gt90, SE.red],
+                  ].map(([label, value, color]) => <div key={String(label)} style={{ textAlign: 'center', border: `1px solid ${color}`, background: `${color}15`, borderRadius: 10, padding: '7px 5px' }}><div style={{ color: String(color), fontWeight: 950, fontSize: 16 }}>{value}</div><div style={{ color: palette.muted, fontWeight: 800, fontSize: 9 }}>{label} days</div></div>)}
+                </div>
+              </div>
             </div>
           </SectionCard>
 
@@ -1267,23 +1459,23 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             <h2 style={analyticsGroupTitle(palette)}>1. Risk Posture Relationship</h2>
             <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 12, marginBottom: 20 }}>
               <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Risk Matrix Heatmap</h3>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginBottom: 8 }}>
-                  {[['Very High (20-25)', ZONE_COLORS['Very High']], ['High (15-19)', ZONE_COLORS.High], ['Moderate (8-14)', ZONE_COLORS.Moderate], ['Low (2-4)', ZONE_COLORS.Low], ['Very Low (1-4)', ZONE_COLORS['Very Low']]].map(([l, c]) => (
-                    <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: palette.muted }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 2, background: c, flexShrink: 0 }} />{l}
-                    </span>
-                  ))}
+                <h3 style={chartTitle(palette)}>Risk Rating Distribution</h3>
+                <ResponsiveContainer width="100%" height={286}>
+                  <PieChart>
+                    <Pie data={riskRatingDistributionData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={72} outerRadius={106} paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}>
+                      {riskRatingDistributionData.map(item => <Cell key={item.name} fill={item.color} />)}
+                    </Pie>
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={legendStyle}>
+                  {riskRatingDistributionData.map(item => <span key={item.name} style={legendItem(palette)}><span style={{ width: 10, height: 10, borderRadius: 3, background: item.color }} />{item.name} ({item.value})</span>)}
                 </div>
-                <RiskHeatMap risks={filteredRisks} palette={palette} isDark={isDark} />
-                <p style={{ fontSize: 9, color: palette.muted, marginTop: 6, lineHeight: 1.5 }}>
-                  <strong>Score Matrix Reference:</strong> Score = Likelihood × Impact. This is the primary risk concentration view.
-                </p>
               </div>
 
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>Average Risk Score Gauge</h3>
-                <ProgressGauge score={kpis.avgRiskScore} palette={palette} />
+                <ProgressGauge score={filteredAvgRiskScore || kpis.avgRiskScore} palette={palette} />
                 <div style={{ marginTop: 4, borderTop: `1px solid ${palette.border}`, paddingTop: 10, fontSize: 10.5, color: palette.muted, lineHeight: 1.55 }}>
                   <strong style={{ color: palette.text }}>Purpose:</strong> one posture score to support executive escalation before drilling into owners, departments, and mitigations.
                 </div>
@@ -1525,6 +1717,40 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               })}
             </div>
           </SectionCard>
+
+          <SectionCard id="action-performance-section" title="Action Performance — Status + Overdue Aging" palette={palette} compact open={true} onOpenChange={() => undefined}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.35fr', gap: 12 }}>
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Action Status</h3>
+                <ResponsiveContainer width="100%" height={246}>
+                  <PieChart>
+                    <Pie data={actionStatusData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={58} outerRadius={88} paddingAngle={3}>
+                      {actionStatusData.map(item => <Cell key={item.name} fill={item.color} />)}
+                    </Pie>
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={legendStyle}>
+                  {actionStatusData.map(item => <span key={item.name} style={legendItem(palette)}><span style={{ width: 10, height: 10, borderRadius: 3, background: item.color }} />{item.name} ({item.value})</span>)}
+                </div>
+              </div>
+
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Overdue Categories</h3>
+                <ResponsiveContainer width="100%" height={246}>
+                  <BarChart data={overdueAgingChartData} margin={{ top: 18, right: 22, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                    <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: palette.text, fontWeight: 800 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: palette.muted }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="count" name="Overdue Actions" radius={[5, 5, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 10, fontWeight: 900, fill: palette.text, formatter: (v: number) => v }}>
+                      {overdueAgingChartData.map(item => <Cell key={item.bucket} fill={item.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </SectionCard>
           </div>}
 
           {activeMainTab === 'register' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1588,14 +1814,14 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     <ImageDown size={12} />PNG
                   </SmallActionButton>
                 </div>
-                <div ref={selectedRef} className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 14, alignItems: 'start' }}>
+                <div ref={selectedRef} className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: 'minmax(430px, 0.95fr) minmax(0, 1.35fr)', gap: 14, alignItems: 'start' }}>
                   <div style={chartBox(palette)}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><ScoreBadge score={activeRisk.score} /><span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 950, fontSize: 12 }}>{activeRisk.rating}</span><span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span></div>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={selectedChartData} margin={{ top: 18, right: 20, left: 0, bottom: 4 }}>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={selectedChartData} margin={{ top: 24, right: 18, left: 4, bottom: 8 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: palette.text }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                        <YAxis tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
+                        <XAxis dataKey="name" interval={0} tick={{ fontSize: 10, fill: palette.text, fontWeight: 800 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                        <YAxis width={42} tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
                         <Tooltip content={<ChartTooltip palette={palette} />} />
                         <Bar dataKey="value" name="Value" radius={[8, 8, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: palette.text, formatter: (v: number) => v > 0 ? `${v}%` : 'No Change' }}>
                           {selectedChartData.map((d, i) => <Cell key={i} fill={d.color} />)}
@@ -1606,20 +1832,20 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 16, padding: 14, color: palette.text }}>
                     <h3 style={{ margin: 0, fontFamily: 'DM Sans, sans-serif', fontSize: 14, fontWeight: 950, color: palette.text }}>Mitigation Plan</h3>
                     <p style={{ whiteSpace: 'pre-line', fontSize: 12, lineHeight: 1.6, color: palette.muted, marginTop: 8 }}>{activeRisk.mitigation || 'No mitigation details available.'}</p>
-                    <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
                       <div style={miniMetric(palette)}><span>Owner</span><strong>{activeRisk.owner || '–'}</strong></div>
                       <div style={miniMetric(palette)}><span>Closing Date</span><strong>{activeRisk.closingDate || '–'}</strong></div>
                       <div style={miniMetric(palette)}><span>Status</span><strong>{activeRisk.progressStatus || '–'}</strong></div>
                     </div>
                     {weeks?.length > 1 && <div style={{ marginTop: 12, padding: 10, borderRadius: 12, background: palette.cardSolid, border: `1px solid ${palette.border}` }}>
                       <div style={{ fontSize: 10, color: palette.muted, marginBottom: 6, fontWeight: 900 }}>Progress trend across all weeks</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto' }}>{weeks.map((w, i) => {
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: 8, overflow: 'visible' }}>{weeks.map((w, i) => {
                         const val = Math.round((activeRisk.weekProgress[w.label] ?? 0) * 100);
                         const prev = i > 0 ? Math.round((activeRisk.weekProgress[weeks[i - 1].label] ?? 0) * 100) : val;
                         const color = val > prev ? SE.green : val < prev ? SE.red : palette.muted;
                         const isSelected = w.label === selectedWeek;
                         const isPrev = w.label === prevWeekLabel;
-                        return <div key={w.label} style={{ minWidth: 72, textAlign: 'center', padding: '6px 7px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : isPrev ? 'rgba(243,156,18,.12)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : isPrev ? `1px solid ${SE.gold}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 13, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div>{isSelected && <div style={{ fontSize: 7, color: SE.blue, fontWeight: 900, marginTop: 1 }}>CURRENT</div>}{isPrev && !isSelected && <div style={{ fontSize: 7, color: SE.gold, fontWeight: 900, marginTop: 1 }}>PREVIOUS</div>}</div>;
+                        return <div key={w.label} style={{ minWidth: 0, textAlign: 'center', padding: '7px 8px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : isPrev ? 'rgba(243,156,18,.12)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : isPrev ? `1px solid ${SE.gold}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 14, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8.5, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div>{isSelected && <div style={{ fontSize: 7.5, color: SE.blue, fontWeight: 900, marginTop: 1 }}>CURRENT</div>}{isPrev && !isSelected && <div style={{ fontSize: 7.5, color: SE.gold, fontWeight: 900, marginTop: 1 }}>PREVIOUS</div>}</div>;
                       })}</div>
                     </div>}
                   </div>
@@ -1688,12 +1914,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 <tbody>
                   {riskLogFiltered.length === 0 ? (
                     <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: palette.muted, background: palette.cardSolid }}>No risks found.</td></tr>
-                  ) : riskLogFiltered.map((r, i) => {
+                  ) : pagedRiskLogRisks.map((r, i) => {
                     const isExpanded = expandedRiskId === r.id;
                     const ratingColor = getRatingColor(r.rating);
                     return (
-                      <>
-                        <tr key={r.id} style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid, cursor: 'pointer' }}
+                      <React.Fragment key={r.id}>
+                        <tr style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid, cursor: 'pointer' }}
                           onClick={() => setExpandedRiskId(isExpanded ? null : r.id)}>
                           <td style={{ padding: '8px 10px', textAlign: 'center', color: palette.muted }}>
                             {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -1773,12 +1999,13 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                             </td>
                           </tr>
                         )}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+            <PaginationControls page={safeRiskLogPage} totalItems={riskLogFiltered.length} onPageChange={setRiskLogPage} palette={palette} label="risk log records" />
           </SectionCard>
           </div>}
 
@@ -1952,15 +2179,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="overdue-section" title="Overdue Action Alert Center" palette={palette} bodyRef={overdueRef} open={sectionOpen['overdue-section']} onOpenChange={open => setSingleSectionOpen('overdue-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(overdueRef, 'Overdue_Actions.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div ref={overdueRef}>
               {/* Alert banner */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: overdueActions?.count > 0 ? 'rgba(192,57,43,.12)' : 'rgba(39,174,96,.10)', border: `1px solid ${overdueActions?.count > 0 ? SE.red : SE.green}`, borderRadius: 12, padding: '10px 16px', marginBottom: 12 }}>
-                <AlertTriangle size={18} color={overdueActions?.count > 0 ? SE.red : SE.green} />
-                <span style={{ fontWeight: 900, fontSize: 13, color: overdueActions?.count > 0 ? SE.red : SE.green }}>
-                  {overdueActions?.count > 0 ? `${overdueActions.count} overdue action${overdueActions.count > 1 ? 's' : ''} require immediate attention` : 'All actions are on schedule'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: overdueFilteredItems.length > 0 ? 'rgba(192,57,43,.12)' : 'rgba(39,174,96,.10)', border: `1px solid ${overdueFilteredItems.length > 0 ? SE.red : SE.green}`, borderRadius: 12, padding: '10px 16px', marginBottom: 12 }}>
+                <AlertTriangle size={18} color={overdueFilteredItems.length > 0 ? SE.red : SE.green} />
+                <span style={{ fontWeight: 900, fontSize: 13, color: overdueFilteredItems.length > 0 ? SE.red : SE.green }}>
+                  {overdueFilteredItems.length > 0 ? `${overdueFilteredItems.length} overdue action${overdueFilteredItems.length > 1 ? 's' : ''} require immediate attention` : 'All actions are on schedule'}
                 </span>
               </div>
-              {overdueActions?.items?.length > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              {overdueFilteredItems.length > 0 ? (
+                <div style={{ overflow: 'hidden', border: `1px solid ${palette.border}`, borderRadius: 12 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 11 }}>
                     <thead>
                       <tr style={{ background: palette.tableHead }}>
                         {['#', 'Risk Title', 'Owner', 'Closing Date', 'Status', 'Progress'].map(h => (
@@ -1969,9 +2196,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                       </tr>
                     </thead>
                     <tbody>
-                      {overdueActions.items.map((item, i) => (
+                      {pagedOverdueItems.map((item, i) => (
                         <tr key={i} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}` }}>
-                          <td style={{ padding: '8px 10px', color: SE.red, fontWeight: 900 }}>{i + 1}</td>
+                          <td style={{ padding: '8px 10px', color: SE.red, fontWeight: 900 }}>{overdueStartIndex + i + 1}</td>
                           <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 800 }}>{item.riskTitle}</td>
                           <td style={{ padding: '8px 10px', color: SE.cyan }}>{item.owner}</td>
                           <td style={{ padding: '8px 10px', color: SE.orange, fontWeight: 800 }}>{item.closingDate}</td>
@@ -1994,6 +2221,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               ) : (
                 <div style={{ textAlign: 'center', padding: '30px 0', color: SE.green, fontWeight: 800, fontSize: 13 }}>No overdue actions found</div>
               )}
+              <PaginationControls page={safeOverduePage} totalItems={overdueFilteredItems.length} onPageChange={setOverduePage} palette={palette} label="overdue actions" />
             </div>
           </SectionCard>
           </div>}
@@ -2006,7 +2234,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               {/* KPI summary row */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                 {(['on-track', 'at-risk', 'breached'] as const).map(s => {
-                  const count = kriData?.items?.filter(k => k.status === s).length ?? 0;
+                  const count = kriFilteredItems.filter(k => k.status === s).length;
                   const color = s === 'on-track' ? SE.green : s === 'at-risk' ? SE.gold : SE.red;
                   const label = s === 'on-track' ? 'On Track' : s === 'at-risk' ? 'At Risk' : 'Breached';
                   return (
@@ -2017,37 +2245,33 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   );
                 })}
               </div>
-              {/* KRI table */}
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                  <thead>
-                    <tr style={{ background: palette.tableHead }}>
-                      {['Risk Title', 'KRI Name', 'Measure', 'Unit', 'Target', 'Actual', 'Status'].map(h => (
-                        <th key={h} style={{ padding: '8px 10px', color: '#fff', fontWeight: 900, textAlign: 'left', whiteSpace: 'nowrap', fontSize: 10 }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(kriData?.items ?? []).map((item, i) => {
-                      const color = item.status === 'on-track' ? SE.green : item.status === 'at-risk' ? SE.gold : SE.red;
-                      const label = item.status === 'on-track' ? 'On Track' : item.status === 'at-risk' ? 'At Risk' : 'Breached';
-                      return (
-                        <tr key={i} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}` }}>
-                          <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 800, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.riskTitle}</td>
-                          <td style={{ padding: '8px 10px', color: SE.cyan }}>{item.kriName}</td>
-                          <td style={{ padding: '8px 10px', color: palette.muted }}>{item.kriMeasure}</td>
-                          <td style={{ padding: '8px 10px', color: palette.muted, textAlign: 'center' }}>{item.kriUnit}</td>
-                          <td style={{ padding: '8px 10px', color: SE.blue, fontWeight: 800, textAlign: 'right' }}>{item.kriTarget}</td>
-                          <td style={{ padding: '8px 10px', color, fontWeight: 900, textAlign: 'right' }}>{item.kriActual}</td>
-                          <td style={{ padding: '8px 10px' }}>
-                            <span style={{ background: `${color}22`, color, border: `1px solid ${color}`, borderRadius: 6, padding: '2px 8px', fontWeight: 800, fontSize: 10 }}>{label}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              {/* KRI traffic-light cards — 10 per page */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(150px, 1fr))', gap: 10 }}>
+                {pagedKriItems.map((item, i) => {
+                  const color = item.status === 'on-track' ? SE.green : item.status === 'at-risk' ? SE.gold : SE.red;
+                  const label = item.status === 'on-track' ? 'Above Target' : item.status === 'at-risk' ? 'Moderate' : 'Below Target';
+                  const ratio = item.kriTarget ? Math.min(140, Math.max(0, (Number(item.kriActual) / Math.max(Number(item.kriTarget), 0.0001)) * 100)) : 0;
+                  return (
+                    <div key={`${item.riskTitle}-${item.kriName}-${i}`} style={{ background: palette.cardSoft, border: `1px solid ${color}`, borderRadius: 14, padding: 12, minHeight: 166, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                        <span style={{ width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', background: color, fontWeight: 950 }}>{item.status === 'on-track' ? '✓' : item.status === 'at-risk' ? '!' : '✕'}</span>
+                        <span style={{ fontSize: 9.5, fontWeight: 950, color, border: `1px solid ${color}`, borderRadius: 999, padding: '2px 7px', background: `${color}18`, whiteSpace: 'nowrap' }}>{label}</span>
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 950, color: palette.text, lineHeight: 1.25, minHeight: 28, overflow: 'hidden' }} title={item.kriName}>{item.kriName || 'KRI'}</div>
+                      <div style={{ fontSize: 9.5, color: palette.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={item.riskTitle}>{item.riskTitle}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 'auto' }}>
+                        <div style={{ background: palette.cardSolid, borderRadius: 10, padding: '6px 8px', border: `1px solid ${palette.border}` }}><div style={{ fontSize: 8.5, color: palette.muted, fontWeight: 800 }}>Target</div><div style={{ fontSize: 15, color: SE.blue, fontWeight: 950 }}>{item.kriTarget}</div></div>
+                        <div style={{ background: palette.cardSolid, borderRadius: 10, padding: '6px 8px', border: `1px solid ${palette.border}` }}><div style={{ fontSize: 8.5, color: palette.muted, fontWeight: 800 }}>Actual</div><div style={{ fontSize: 15, color, fontWeight: 950 }}>{item.kriActual}</div></div>
+                      </div>
+                      <div style={{ height: 8, borderRadius: 999, background: palette.border, overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.min(100, ratio)}%`, height: '100%', background: color, borderRadius: 999 }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+              {pagedKriItems.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: palette.muted, border: `1px dashed ${palette.border}`, borderRadius: 12 }}>No KRI records match the selected filters.</div>}
+              <PaginationControls page={safeKriPage} totalItems={kriFilteredItems.length} onPageChange={setKriPage} palette={palette} label="KRI records" />
             </div>
           </SectionCard>
 
@@ -2240,7 +2464,7 @@ function cellColor(likelihood: number, impact: number): string {
   return '#2ECC71';                     // Very Low
 }
 
-function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: ThemePalette; isDark: boolean }) {
+function RiskHeatMap({ risks, palette, isDark, selectedCell, onCellSelect }: { risks: RiskRow[]; palette: ThemePalette; isDark: boolean; selectedCell?: { likelihood: number; impact: number } | null; onCellSelect?: (cell: HeatMapCell) => void }) {
   const [hoveredCell, setHoveredCell] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; cell: HeatMapCell } | null>(null);
 
@@ -2293,13 +2517,14 @@ function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: Th
                 const key = `${li}-${ii}`;
                 const bg = cellColor(li + 1, ii + 1);
                 const count = cell.risks.length;
+                const isSelected = selectedCell?.likelihood === cell.likelihood && selectedCell?.impact === cell.impact;
                 return (
                   <div
                     key={ii}
                     style={{
                       flex: 1, minHeight: 52, margin: '0 2px', borderRadius: 8,
                       background: count > 0 ? bg : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                      border: `2px solid ${count > 0 ? bg : palette.border}`,
+                      border: isSelected ? `3px solid ${SE.blue}` : `2px solid ${count > 0 ? bg : palette.border}`,
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       cursor: count > 0 ? 'pointer' : 'default',
                       opacity: count > 0 ? 1 : 0.35,
@@ -2315,6 +2540,7 @@ function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: Th
                       }
                     }}
                     onMouseLeave={() => { setHoveredCell(null); setTooltip(null); }}
+                    onClick={() => { if (count > 0) onCellSelect?.(cell); }}
                   >
                     {count > 0 && (
                       <>
@@ -2368,7 +2594,7 @@ function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: Th
       {/* Score matrix reference */}
       <div style={{ marginTop: 8, padding: '8px 12px', background: palette.cardSoft, borderRadius: 10, border: `1px solid ${palette.border}` }}>
         <span style={{ fontSize: 10, fontWeight: 900, color: palette.text }}>Score Matrix Reference: </span>
-        <span style={{ fontSize: 10, color: palette.muted }}>Score = Likelihood × Impact. Hover over any cell to see the risks plotted there.</span>
+        <span style={{ fontSize: 10, color: palette.muted }}>Score = Likelihood × Impact. Hover to inspect risks; click a populated cell to filter the dashboard.</span>
       </div>
     </div>
   );
@@ -2452,124 +2678,60 @@ const TAXONOMY_COLORS = [
 
 function RiskTaxonomyChart({ data, palette }: { data: { categories: { name: string; count: number; subCategories: { name: string; count: number }[] }[]; riskTypes: { name: string; count: number }[] }; palette: ThemePalette }) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-
-  const total = data.categories.reduce((a, b) => a + b.count, 0);
-
+  const total = data.categories.reduce((a, b) => a + b.count, 0) || 1;
+  const maxCategory = Math.max(1, ...data.categories.map(c => c.count));
   const activeCat = activeCategory ? data.categories.find(c => c.name === activeCategory) : null;
 
   return (
-    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-
-      {/* Left: Category donut + sub-category drill-down */}
-      <div style={{ flex: '2 1 340px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ ...chartBox(palette), display: 'flex', flexDirection: 'column' }}>
-          <h3 style={chartTitle(palette)}>Risk Categories — Click to drill down</h3>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            {/* Donut */}
-            <div style={{ flex: '0 0 200px' }}>
-              <ResponsiveContainer width={200} height={200}>
-                <PieChart>
-                  <Pie
-                    data={data.categories}
-                    dataKey="count"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    onClick={(entry: any) => setActiveCategory(prev => prev === entry.name ? null : entry.name)}
-                  >
-                    {data.categories.map((cat, i) => (
-                      <Cell
-                        key={cat.name}
-                        fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]}
-                        stroke={activeCategory === cat.name ? '#fff' : 'transparent'}
-                        strokeWidth={activeCategory === cat.name ? 3 : 0}
-                        opacity={activeCategory && activeCategory !== cat.name ? 0.4 : 1}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const d = payload[0].payload;
-                      return (
-                        <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
-                          <div style={{ fontWeight: 900, color: palette.text }}>{d.name}</div>
-                          <div style={{ color: palette.muted }}>{d.count} risk{d.count > 1 ? 's' : ''} ({Math.round(d.count / total * 100)}%)</div>
-                        </div>
-                      );
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            {/* Category list */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5, justifyContent: 'center' }}>
-              {data.categories.map((cat, i) => (
-                <div
-                  key={cat.name}
-                  onClick={() => setActiveCategory(prev => prev === cat.name ? null : cat.name)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', opacity: activeCategory && activeCategory !== cat.name ? 0.45 : 1, transition: 'opacity 0.2s' }}
-                >
-                  <span style={{ width: 10, height: 10, borderRadius: 3, background: TAXONOMY_COLORS[i % TAXONOMY_COLORS.length], flexShrink: 0 }} />
-                  <span style={{ fontSize: 10, color: palette.text, fontWeight: 800, flex: 1 }}>{cat.name}</span>
-                  <span style={{ fontSize: 10, fontWeight: 900, color: TAXONOMY_COLORS[i % TAXONOMY_COLORS.length] }}>{cat.count}</span>
-                  <span style={{ fontSize: 9, color: palette.muted }}>({Math.round(cat.count / total * 100)}%)</span>
+    <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 14 }}>
+      <div style={chartBox(palette)}>
+        <h3 style={chartTitle(palette)}>Risks by Category</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {data.categories.map((cat, i) => {
+            const color = TAXONOMY_COLORS[i % TAXONOMY_COLORS.length];
+            const pct = Math.round((cat.count / total) * 100);
+            return (
+              <button key={cat.name} type="button" onClick={() => setActiveCategory(prev => prev === cat.name ? null : cat.name)} style={{ border: activeCategory === cat.name ? `1px solid ${color}` : `1px solid ${palette.border}`, background: activeCategory === cat.name ? `${color}14` : palette.cardSoft, borderRadius: 11, padding: '8px 10px', cursor: 'pointer', textAlign: 'left' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 190px) 1fr 44px 44px', gap: 8, alignItems: 'center' }}>
+                  <div style={{ color: palette.text, fontWeight: 900, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cat.name}>{cat.name}</div>
+                  <div style={{ height: 10, background: palette.border, borderRadius: 999, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.max(4, (cat.count / maxCategory) * 100)}%`, height: '100%', background: color, borderRadius: 999 }} />
+                  </div>
+                  <div style={{ color, fontWeight: 950, fontSize: 13, textAlign: 'right' }}>{cat.count}</div>
+                  <div style={{ color: palette.muted, fontWeight: 850, fontSize: 10, textAlign: 'right' }}>{pct}%</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {activeCat && (
+          <div style={{ marginTop: 12, padding: 12, background: palette.cardAlt, border: `1px solid ${palette.border}`, borderRadius: 12 }}>
+            <div style={{ fontWeight: 950, color: palette.text, fontSize: 11, marginBottom: 8 }}>{activeCat.name} — Sub-category drill-down</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+              {activeCat.subCategories.map((sub, i) => (
+                <div key={`${sub.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, background: palette.cardSolid, border: `1px solid ${palette.border}`, borderRadius: 9, padding: '6px 8px' }}>
+                  <span style={{ flex: 1, color: palette.muted, fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub.name}</span>
+                  <span style={{ color: SE.cyan, fontWeight: 950, fontSize: 11 }}>{sub.count}</span>
                 </div>
               ))}
             </div>
           </div>
-
-          {/* Sub-category drill-down */}
-          {activeCat && (
-            <div style={{ marginTop: 10, padding: '8px 10px', background: palette.cardAlt, borderRadius: 10, border: `1px solid ${palette.border}` }}>
-              <div style={{ fontWeight: 900, fontSize: 11, color: palette.text, marginBottom: 6 }}>{activeCat.name} — Sub-categories</div>
-              {activeCat.subCategories.map((sub, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <div style={{ flex: 1, height: 7, background: palette.border, borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${(sub.count / activeCat.count) * 100}%`, height: '100%', background: SE.cyan, borderRadius: 3 }} />
-                  </div>
-                  <span style={{ fontSize: 10, color: palette.muted, minWidth: 100 }}>{sub.name}</span>
-                  <span style={{ fontSize: 10, fontWeight: 900, color: SE.cyan }}>{sub.count}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Right: Risk Type bar chart */}
-      <div style={{ flex: '1 1 220px' }}>
-        <div style={chartBox(palette)}>
-          <h3 style={chartTitle(palette)}>Risk Type Distribution</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={data.riskTypes} layout="vertical" margin={{ top: 4, right: 40, left: 10, bottom: 4 }} barSize={16}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: palette.muted }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={false} tickLine={false} width={110} />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  return (
-                    <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
-                      <div style={{ fontWeight: 900, color: palette.text }}>{payload[0].payload.name}</div>
-                      <div style={{ color: SE.blue }}>{payload[0].value} risks</div>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="count" name="Risks" radius={[0, 6, 6, 0]} animationDuration={700}
-                label={{ position: 'right', fontSize: 10, fontWeight: 900, fill: SE.blue, formatter: (v: number) => v }}
-              >
-                {data.riskTypes.map((_, i) => (
-                  <Cell key={i} fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+      <div style={chartBox(palette)}>
+        <h3 style={chartTitle(palette)}>Risk Type Distribution</h3>
+        <ResponsiveContainer width="100%" height={Math.max(240, data.riskTypes.length * 32)}>
+          <BarChart data={data.riskTypes} layout="vertical" margin={{ top: 6, right: 42, left: 6, bottom: 4 }} barSize={17}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+            <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: palette.muted }} axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: palette.text, fontWeight: 800 }} axisLine={false} tickLine={false} width={112} />
+            <Tooltip content={<ChartTooltip palette={palette} />} />
+            <Bar dataKey="count" name="Risks" radius={[0, 6, 6, 0]} animationDuration={700} label={{ position: 'right', fontSize: 10, fontWeight: 900, fill: SE.blue, formatter: (v: number) => v }}>
+              {data.riskTypes.map((_, i) => <Cell key={i} fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
