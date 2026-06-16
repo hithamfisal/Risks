@@ -1,0 +1,11 @@
+{
+  "installCommand": "yarn install --registry https://registry.npmjs.org/ --network-timeout 600000",
+  "buildCommand": "yarn build",
+  "outputDirectory": "dist/public",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
