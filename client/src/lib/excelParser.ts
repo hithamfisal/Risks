@@ -6,8 +6,8 @@
  *    row for its exact name (case-insensitive, trimmed). This means the parser
  *    survives any number of new columns being inserted anywhere in the sheet.
  *
- * 2. ANY sheet name is accepted. The parser uses the first sheet in the workbook,
- *    regardless of what it is called.
+ * 2. ANY sheet name is accepted. The parser scans all workbook sheets and uses
+ *    the sheet with the strongest risk-register header match.
  *
  * 3. Two dynamic blocks grow over time and are auto-detected by content pattern:
  *    a. Residual block  — headers containing "Residual" → skipped (not progress)
@@ -185,6 +185,17 @@ function isNumericCell(v: unknown): boolean {
     !String(v).startsWith('#') && !isNaN(Number(v));
 }
 
+function markerToBool(v: unknown, label: string): boolean | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v > 0;
+  const s = safeStr(v).toLowerCase();
+  if (!s) return null;
+  if (['yes', 'y', 'true', '1', 'x', '✓', '✔'].includes(s)) return true;
+  if (['no', 'n', 'false', '0', '-', '—'].includes(s)) return false;
+  return s.includes(label.toLowerCase()) ? true : null;
+}
+
 function computeZoneCountsFromRisks(risks: RiskRow[]): DashboardData['zoneCounts'] {
   return risks.reduce<DashboardData['zoneCounts']>((acc, risk) => {
     const rating = (safeStr(risk.rating) || deriveRating(risk.score)).toLowerCase().trim();
@@ -210,6 +221,20 @@ function buildRiskSummary(aboveTarget: number, belowTarget: number): DashboardDa
  * Scan the header row and return a map of { normalizedName → colIndex }.
  * Normalisation: lowercase, collapse whitespace, strip leading/trailing spaces.
  */
+function normalizeHeaderName(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/[()\[\]{}]/g, ' ')
+    .replace(/[\\/_–—-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function compactHeaderName(value: unknown): string {
+  return normalizeHeaderName(value).replace(/[^a-z0-9]/g, '');
+}
+
 function buildColMap(headerRow: unknown[]): Map<string, number> {
   const map = new Map<string, number>();
   for (let i = 0; i < headerRow.length; i++) {
@@ -217,22 +242,97 @@ function buildColMap(headerRow: unknown[]): Map<string, number> {
     if (v === null || v === undefined) continue;
     // Skip datetime objects — those are period columns, not named anchors
     if (v instanceof Date) continue;
-    const key = String(v).trim().toLowerCase().replace(/\s+/g, ' ');
-    if (key && !map.has(key)) map.set(key, i);
+    const normal = normalizeHeaderName(v);
+    const compact = compactHeaderName(v);
+    if (normal && !map.has(normal)) map.set(normal, i);
+    if (compact && !map.has(compact)) map.set(compact, i);
   }
   return map;
 }
 
 /**
  * Look up a column index by trying a list of candidate names (first match wins).
+ * Matching is tolerant of spaces, line breaks, hyphens, and small header wording changes.
  * Returns -1 if none found.
  */
 function findCol(colMap: Map<string, number>, ...candidates: string[]): number {
   for (const name of candidates) {
-    const key = name.trim().toLowerCase().replace(/\s+/g, ' ');
+    const key = normalizeHeaderName(name);
     if (colMap.has(key)) return colMap.get(key)!;
   }
+
+  for (const name of candidates) {
+    const compact = compactHeaderName(name);
+    if (compact && colMap.has(compact)) return colMap.get(compact)!;
+  }
+
+  // Fuzzy include match for descriptive headers such as
+  // "Monitoring Indicators (KRIs) (Metrics Description)".
+  const fuzzyBlock = new Set(['id', 'no', '#', 'unit', 'date', 'owner', 'score', 'target', 'actual', 'action']);
+  for (const name of candidates) {
+    const key = normalizeHeaderName(name);
+    const compact = compactHeaderName(name);
+    if (!key || key.length < 5 || fuzzyBlock.has(key)) continue;
+    for (const [header, idx] of Array.from(colMap.entries())) {
+      if (header.includes(key) || (compact && header.includes(compact))) return idx;
+    }
+  }
+
   return -1;
+}
+
+interface SheetMatch {
+  sheetName: string;
+  rows: unknown[][];
+  headerRowIdx: number;
+  score: number;
+}
+
+function scoreHeaderRow(headerRow: unknown[]): number {
+  const colMap = buildColMap(headerRow);
+  let score = 0;
+  if (findCol(colMap, 'risk title', 'risk name', 'risk', 'risk item') >= 0) score += 6;
+  if (findCol(colMap, '#', 'no', 'risk no', 'risk id', 'id', 'serial') >= 0) score += 1;
+  if (findCol(colMap, 'owner', 'risk owner', 'responsible owner') >= 0) score += 2;
+  if (findCol(colMap, 'i-likelihood', 'inherent likelihood', 'likelihood') >= 0) score += 2;
+  if (findCol(colMap, 'i-impact', 'inherent impact', 'impact') >= 0) score += 2;
+  if (findCol(colMap, 'i-score', 'inherent score', 'risk score', 'score') >= 0) score += 2;
+  if (findCol(colMap, 'rating', 'risk rating', 'inherent rating') >= 0) score += 1;
+  if (findCol(colMap, 'action', 'mitigation action', 'mitigation') >= 0) score += 2;
+  if (detectPeriodColumns(headerRow).length > 0) score += 3;
+  return score;
+}
+
+function locateRiskSheet(wb: XLSX.WorkBook): SheetMatch {
+  let best: SheetMatch | null = null;
+
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null }) as unknown[][];
+    if (rows.length < 2) continue;
+
+    for (let r = 0; r < Math.min(30, rows.length); r++) {
+      const row = rows[r] as unknown[];
+      const nonEmpty = row.filter(v => safeStr(v)).length;
+      if (nonEmpty < 3) continue;
+      const score = scoreHeaderRow(row);
+      if (!best || score > best.score) {
+        best = { sheetName, rows, headerRowIdx: r, score };
+      }
+    }
+  }
+
+  if (best && best.score >= 6) return best;
+
+  // Last fallback: first non-empty sheet, first row. This keeps upload tolerant,
+  // but the dashboard will still show empty values if no risk columns exist.
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null }) as unknown[][];
+    if (rows.length >= 2) return { sheetName, rows, headerRowIdx: 0, score: 0 };
+  }
+
+  throw new Error('Workbook contains no readable sheets.');
 }
 
 // ── Period column detection ──────────────────────────────────────────────────
@@ -323,25 +423,13 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   // cellDates:true so Excel date serials become JS Date objects
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
 
-  // Accept ANY sheet name — use the first sheet
-  const sheetName = wb.SheetNames[0];
-  if (!sheetName) throw new Error('Workbook contains no sheets.');
-  const sheet = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null }) as unknown[][];
+  // Accept ANY workbook and ANY sheet name — choose the sheet/header row that
+  // looks most like a risk register rather than relying on a fixed sheet name.
+  const located = locateRiskSheet(wb);
+  const rows = located.rows;
+  const headerRowIdx = located.headerRowIdx;
 
   if (rows.length < 2) throw new Error('Sheet appears to be empty.');
-
-  // ── Find the header row ──────────────────────────────────────────────────
-  // The header row is the first row that contains "Risk Title" (case-insensitive).
-  // Typically row 0 (idx 0), but we scan the first 5 rows to be safe.
-  let headerRowIdx = 0;
-  for (let r = 0; r < Math.min(5, rows.length); r++) {
-    const rowStr = rows[r].map(v => safeStr(v).toLowerCase());
-    if (rowStr.some(s => s === 'risk title' || s.includes('risk title'))) {
-      headerRowIdx = r;
-      break;
-    }
-  }
 
   const headerRow = rows[headerRowIdx] as unknown[];
   const dataStartRow = headerRowIdx + 1;
@@ -349,41 +437,62 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   // ── Build column map (named anchors) ─────────────────────────────────────
   const colMap = buildColMap(headerRow);
 
-  // Locate every anchor field by name
-  const COL_RISK_TITLE   = findCol(colMap, 'risk title');
-  const COL_OWNER        = findCol(colMap, 'owner');
-  const COL_LIKELIHOOD   = findCol(colMap, 'i-likelihood', 'likelihood');
-  const COL_IMPACT       = findCol(colMap, 'i-impact', 'impact');
-  const COL_SCORE        = findCol(colMap, 'i-score', 'risk score', 'score');
-  const COL_RATING       = findCol(colMap, 'rating', 'risk rating');
-  const COL_ACTION       = findCol(colMap, 'action');
-  const COL_ACTION_WEIGHT = findCol(colMap, 'action weight');
-  const COL_CLOSING_DATE = findCol(colMap, 'closing date');
-  const COL_PROGRESS_STATUS = findCol(colMap, 'progress status');
-  const COL_T_SCORE          = findCol(colMap, 't-score', 'target score', 'tscore');
-  const COL_CATEGORY         = findCol(colMap, 'category');
+  // Locate every anchor field by name. Each field has practical aliases so
+  // users can rename columns without breaking the upload.
+  const COL_ID           = findCol(colMap, '#', 'no', 'risk no', 'risk id', 'id', 'serial', 'index');
+  const COL_RISK_TITLE   = findCol(colMap, 'risk title', 'risk name', 'risk item', 'risk');
+  const COL_OWNER        = findCol(colMap, 'owner', 'risk owner', 'responsible owner', 'helper owner');
+  const COL_LIKELIHOOD   = findCol(colMap, 'i-likelihood', 'inherent likelihood', 'likelihood');
+  const COL_IMPACT       = findCol(colMap, 'i-impact', 'inherent impact', 'impact');
+  const COL_SCORE        = findCol(colMap, 'i-score', 'inherent score', 'risk score', 'score');
+  const COL_RATING       = findCol(colMap, 'rating', 'risk rating', 'inherent rating');
+  const COL_ACTION       = findCol(colMap, 'action', 'mitigation action', 'mitigation', 'action description');
+  const COL_ACTION_WEIGHT = findCol(colMap, 'action weight', 'weight', 'weighting');
+  const COL_CLOSING_DATE = findCol(colMap, 'closing date', 'target close', 'target close date', 'due date');
+  const COL_PROGRESS_STATUS = findCol(colMap, 'progress status', 'status', 'action status');
+  const COL_T_SCORE          = findCol(colMap, 't-score', 'target score', 'target risk score', 'tscore');
+  const COL_CATEGORY         = findCol(colMap, 'category', 'risk category');
   const COL_SUB_CATEGORY     = findCol(colMap, 'sub - category', 'sub-category', 'sub category', 'subcategory');
-  const COL_RISK_TYPE        = findCol(colMap, 'risk type');
-  const COL_KRI_NAME         = findCol(colMap, 'monitoring indicators', 'monitoring indicator', 'kri', 'key risk indicator');
-  const COL_KRI_MEASURE      = findCol(colMap, 'measure');
-  const COL_KRI_UNIT         = findCol(colMap, 'unit');
-  // KRI target and actual: there may be two "Target" columns — we want the one AFTER the KRI name column
-  let COL_KRI_TARGET = -1;
-  let COL_KRI_ACTUAL = -1;
+  const COL_RISK_TYPE        = findCol(colMap, 'risk type', 'type');
+  const COL_ABOVE_TARGET     = findCol(colMap, 'above target');
+  const COL_BELOW_TARGET     = findCol(colMap, 'below target');
+  const COL_KRI_NAME         = findCol(colMap, 'monitoring indicators', 'monitoring indicator', 'key risk indicator', 'kri');
+  const COL_KRI_MEASURE      = findCol(colMap, 'measure', 'kri measure', 'metric measure');
+  const COL_KRI_UNIT         = findCol(colMap, 'unit', 'kri unit');
+  // KRI target and actual: there may be several target columns. Prefer the
+  // explicit KRI target names, then fall back to the first Target/Actual columns
+  // after the KRI-name block.
+  let COL_KRI_TARGET = findCol(colMap, 'target kri', 'kri target', 'target key risk indicator');
+  let COL_KRI_ACTUAL = findCol(colMap, 'actual', 'kri actual', 'actual kri');
   for (let i = 0; i < headerRow.length; i++) {
-    const h = safeStr(headerRow[i]).toLowerCase().trim();
-    if (h === 'target' && i > (COL_KRI_NAME > 0 ? COL_KRI_NAME : 0) && COL_KRI_TARGET === -1) COL_KRI_TARGET = i;
-    if (h === 'actual' && i > (COL_KRI_NAME > 0 ? COL_KRI_NAME : 0) && COL_KRI_ACTUAL === -1) COL_KRI_ACTUAL = i;
+    const h = normalizeHeaderName(headerRow[i]);
+    if ((h === 'target' || h === 'target kri' || h === 'kri target') &&
+        i > (COL_KRI_NAME > 0 ? COL_KRI_NAME : 0) && COL_KRI_TARGET === -1) COL_KRI_TARGET = i;
+    if ((h === 'actual' || h === 'actual kri' || h === 'kri actual') &&
+        i > (COL_KRI_NAME > 0 ? COL_KRI_NAME : 0) && COL_KRI_ACTUAL === -1) COL_KRI_ACTUAL = i;
   }
 
   // ── Detect period (month/week) columns ───────────────────────────────────
   const weeks = detectPeriodColumns(headerRow);
 
   // ── Count totals ─────────────────────────────────────────────────────────
-  // Total Risks = rows where col A (idx 0) is a positive integer (risk number)
-  const totalRisks = rows.slice(dataStartRow).filter(row =>
-    isNumericCell((row as unknown[])[0]) && Number((row as unknown[])[0]) > 0
-  ).length;
+  // Total Risks = risk title rows. Prefer the detected ID/# column if present,
+  // otherwise count unique non-empty risk titles.
+  const riskTitleSetForCount = new Set<string>();
+  let totalRisks = 0;
+  rows.slice(dataStartRow).forEach(rawRow => {
+    const row = rawRow as unknown[];
+    const title = COL_RISK_TITLE >= 0 ? safeStr(row[COL_RISK_TITLE]) : '';
+    if (!title) return;
+    const idValue = COL_ID >= 0 ? row[COL_ID] : row[0];
+    if (COL_ID >= 0 || isNumericCell(idValue)) {
+      if (isNumericCell(idValue) && Number(idValue) > 0) totalRisks += 1;
+      else if (COL_ID < 0) riskTitleSetForCount.add(title);
+    } else {
+      riskTitleSetForCount.add(title);
+    }
+  });
+  if (totalRisks === 0) totalRisks = riskTitleSetForCount.size;
 
   // Total Mitigation = rows where Action Weight column has a valid decimal
   const totalMitigation = COL_ACTION_WEIGHT >= 0
@@ -412,6 +521,9 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const scoreMap: Record<string, number> = {};
   const ratingMap: Record<string, string> = {};
   const closingDateMap: Record<string, string> = {};
+  const progressStatusMap: Record<string, string> = {};
+  const aboveTargetMap: Record<string, boolean | null> = {};
+  const belowTargetMap: Record<string, boolean | null> = {};
   const likelihoodMap: Record<string, number> = {};
   const impactMap: Record<string, number> = {};
   const residualScoreMap: Record<string, number> = {};
@@ -430,9 +542,15 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   for (let i = dataStartRow; i < rows.length; i++) {
     const row = rows[i] as unknown[];
 
-    // Identify title rows: col A (idx 0) is a positive integer AND Risk Title col is non-empty
+    // Identify risk rows. If an ID/# column exists, use it. If not, any
+    // non-empty risk-title row is accepted so files without serial numbers work.
     const titleVal = COL_RISK_TITLE >= 0 ? safeStr(row[COL_RISK_TITLE]) : '';
-    const isRiskTitleRow = titleVal !== '' && isNumericCell(row[0]) && Number(row[0]) > 0;
+    const idValue = COL_ID >= 0 ? row[COL_ID] : row[0];
+    const isRiskTitleRow = titleVal !== '' && (
+      COL_ID < 0 ||
+      (isNumericCell(idValue) && Number(idValue) > 0) ||
+      safeStr(idValue) !== ''
+    );
 
     if (isRiskTitleRow) {
       currentRisk = titleVal;
@@ -452,6 +570,9 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       scoreMap[currentRisk]        = COL_SCORE >= 0          ? safeNum(row[COL_SCORE])        : 0;
       ratingMap[currentRisk]       = COL_RATING >= 0         ? (safeStr(row[COL_RATING]) || deriveRating(safeNum(row[COL_SCORE]))) : deriveRating(safeNum(row[COL_SCORE]));
       closingDateMap[currentRisk]  = COL_CLOSING_DATE >= 0   ? safeStr(row[COL_CLOSING_DATE]) : '';
+      progressStatusMap[currentRisk] = COL_PROGRESS_STATUS >= 0 ? safeStr(row[COL_PROGRESS_STATUS]) : '';
+      aboveTargetMap[currentRisk]  = COL_ABOVE_TARGET >= 0   ? markerToBool(row[COL_ABOVE_TARGET], 'above target') : null;
+      belowTargetMap[currentRisk]  = COL_BELOW_TARGET >= 0   ? markerToBool(row[COL_BELOW_TARGET], 'below target') : null;
       likelihoodMap[currentRisk]   = COL_LIKELIHOOD >= 0     ? safeNum(row[COL_LIKELIHOOD])   : 0;
       impactMap[currentRisk]       = COL_IMPACT >= 0         ? safeNum(row[COL_IMPACT])       : 0;
       residualScoreMap[currentRisk]= COL_RESIDUAL_SCORE >= 0 ? safeNum(row[COL_RESIDUAL_SCORE]) : 0;
@@ -468,13 +589,12 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
 
     if (!currentRisk) continue;
 
-    // Collect action text from action sub-rows
+    // Collect action text from either title rows or action sub-rows.
     if (COL_ACTION >= 0) {
       const action = safeStr(row[COL_ACTION]);
-      // Only collect if this row is NOT a title row (avoid duplicating the title row's action if any)
-      if (action && !isRiskTitleRow) {
+      if (action) {
         if (!mitigationMap[currentRisk]) mitigationMap[currentRisk] = [];
-        mitigationMap[currentRisk].push(action);
+        if (!mitigationMap[currentRisk].includes(action)) mitigationMap[currentRisk].push(action);
       }
     }
   }
@@ -499,12 +619,14 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
     const currentPct     = pct(curVal);
     const beforePct      = pct(prevVal);
     const developmentPct = Math.round((curVal - prevVal) * 100);
-    const aboveFlag      = currentPct >= 100;
-    const belowFlag      = currentPct < 100 && curVal <= prevVal;
+    const sheetAboveFlag = aboveTargetMap[title];
+    const sheetBelowFlag = belowTargetMap[title];
+    const aboveFlag      = sheetAboveFlag !== null && sheetAboveFlag !== undefined ? sheetAboveFlag : currentPct >= 100;
+    const belowFlag      = sheetBelowFlag !== null && sheetBelowFlag !== undefined ? sheetBelowFlag : (currentPct < 100 && !aboveFlag);
 
     // Progress status: prefer reading from the sheet if column exists,
     // otherwise derive from currentPct
-    const progressStatus = deriveProgressStatus(currentPct);
+    const progressStatus = progressStatusMap[title] || deriveProgressStatus(currentPct);
 
     return {
       id: `risk-${idx}`,
@@ -770,185 +892,5 @@ export function switchWeek(data: DashboardData, newWeek: string): DashboardData 
     riskSummary,
     riskRegister,
     selectedRisk,
-  };
-}
-
-// ── Sample data (static fallback for demo / first load) ──────────────────────
-export function getSampleData(): DashboardData {
-  const weeks: WeekData[] = [
-    { label: 'Jan-2026', colIndex: 35 },
-    { label: 'Feb-2026', colIndex: 36 },
-    { label: 'Mar-2026', colIndex: 37 },
-    { label: 'Apr-2026', colIndex: 38 },
-  ];
-
-  const sampleRisks: RiskRow[] = [
-    {
-      id: '1', title: 'Data Quality and Reporting Risk',
-      owner: 'Maya Stone', score: 12, rating: 'Moderate',
-      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Implement monitoring report and review cycle.\n2. Perform field inspection and close corrective actions.',
-      weekProgress: { 'Jan-2026': 0.42, 'Feb-2026': 0.45, 'Mar-2026': 0.51, 'Apr-2026': 0.50 },
-      currentPct: 50, beforePct: 51, developmentPct: -1, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 3, residualScore: 6,
-      tScore: 6, category: 'Supplier Management', subCategory: 'Process', riskType: 'Division Level',
-      kriName: 'Backup test success rate', kriMeasure: 'Test pass rate', kriUnit: '%', kriTarget: 0.7, kriActual: 2, isOverdue: false,
-    },
-    {
-      id: '2', title: 'Documentation Accuracy Risk',
-      owner: 'Nora Adams', score: 9, rating: 'Moderate',
-      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Coordinate with supplier and agree delivery schedule.\n2. Automate weekly KPI report.',
-      weekProgress: { 'Jan-2026': 0.00, 'Feb-2026': 0.01, 'Mar-2026': 0.02, 'Apr-2026': 0.02 },
-      currentPct: 2, beforePct: 2, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 3, residualScore: 4,
-      tScore: 4, category: 'Business Resilience', subCategory: 'People', riskType: 'Division Level',
-      kriName: 'Documentation error rate', kriMeasure: 'Error count per audit', kriUnit: '#', kriTarget: 2, kriActual: 5, isOverdue: false,
-    },
-    {
-      id: '3', title: 'Access Control Compliance Risk',
-      owner: 'Hana Blake', score: 20, rating: 'Very High',
-      closingDate: 'Q1 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Enforce MFA on all critical systems.\n2. Conduct quarterly access reviews.',
-      weekProgress: { 'Jan-2026': 0.30, 'Feb-2026': 0.28, 'Mar-2026': 0.38, 'Apr-2026': 0.38 },
-      currentPct: 38, beforePct: 38, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 4, residualScore: 12,
-      tScore: 9, category: 'Compliance', subCategory: 'Security', riskType: 'Project Level',
-      kriName: 'Number of overdue actions', kriMeasure: 'Overdue action count', kriUnit: '#', kriTarget: 0.9, kriActual: 4, isOverdue: true,
-    },
-    {
-      id: '4', title: 'Incident Response Delay Risk',
-      owner: 'Lina Brooks', score: 1, rating: 'Very Low',
-      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Define SLA for incident response.\n2. Automate escalation workflows.',
-      weekProgress: { 'Jan-2026': 0.00, 'Feb-2026': 0.00, 'Mar-2026': 0.00, 'Apr-2026': 0.02 },
-      currentPct: 2, beforePct: 0, developmentPct: 2, aboveTarget: false, belowTarget: true, likelihood: 1, impact: 1, residualScore: 1,
-      tScore: 1, category: 'Asset Management', subCategory: 'Facilities', riskType: 'Department Level',
-      kriName: 'Incident response time', kriMeasure: 'Avg hours to resolve', kriUnit: 'hrs', kriTarget: 4, kriActual: 2, isOverdue: false,
-    },
-    {
-      id: '5', title: 'Inventory Shortage Risk',
-      owner: 'Nora Adams', score: 16, rating: 'High',
-      closingDate: 'Q2 2026', progressStatus: 'Completed (100%)',
-      mitigation: '1. Establish safety stock levels.\n2. Diversify supplier base.',
-      weekProgress: { 'Jan-2026': 0.94, 'Feb-2026': 0.94, 'Mar-2026': 0.93, 'Apr-2026': 1.00 },
-      currentPct: 100, beforePct: 93, developmentPct: 7, aboveTarget: true, belowTarget: false, likelihood: 4, impact: 4, residualScore: 9,
-      tScore: 8, category: 'Supplier Management', subCategory: 'Vendors', riskType: 'Division Level',
-      kriName: 'Supplier delivery rate', kriMeasure: 'On-time delivery %', kriUnit: '%', kriTarget: 0.9, kriActual: 0.85, isOverdue: false,
-    },
-    {
-      id: '6', title: 'Service Desk Workload Risk',
-      owner: 'Omar Reed', score: 12, rating: 'Moderate',
-      closingDate: 'Q2 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Hire additional service desk agents.\n2. Implement self-service portal.',
-      weekProgress: { 'Jan-2026': 0.59, 'Feb-2026': 0.57, 'Mar-2026': 0.54, 'Apr-2026': 0.64 },
-      currentPct: 64, beforePct: 54, developmentPct: 10, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 3, residualScore: 9,
-      tScore: 6, category: 'Operational Excellence', subCategory: 'Process', riskType: 'Department Level',
-      kriName: 'Ticket backlog count', kriMeasure: 'Open tickets', kriUnit: '#', kriTarget: 50, kriActual: 80, isOverdue: false,
-    },
-    {
-      id: '7', title: 'Contract Renewal Delay Risk',
-      owner: 'Samir Hale', score: 9, rating: 'Moderate',
-      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Set 90-day renewal reminders.\n2. Assign contract manager per vendor.',
-      weekProgress: { 'Jan-2026': 0.60, 'Feb-2026': 0.59, 'Mar-2026': 0.56, 'Apr-2026': 0.60 },
-      currentPct: 60, beforePct: 56, developmentPct: 4, aboveTarget: false, belowTarget: true, likelihood: 3, impact: 3, residualScore: 6,
-      tScore: 4, category: 'Supplier Management', subCategory: 'Vendors', riskType: 'Project Level',
-      kriName: 'Contract renewal lead time', kriMeasure: 'Days before expiry', kriUnit: 'days', kriTarget: 90, kriActual: 45, isOverdue: false,
-    },
-    {
-      id: '8', title: 'Backup Power Availability Risk',
-      owner: 'Samir Hale', score: 20, rating: 'Very High',
-      closingDate: 'Q3 2026', progressStatus: 'Not Started (0%)',
-      mitigation: '1. Install UPS at critical sites.\n2. Test generator failover monthly.',
-      weekProgress: { 'Jan-2026': 0.01, 'Feb-2026': 0.00, 'Mar-2026': 0.00, 'Apr-2026': 0.00 },
-      currentPct: 0, beforePct: 0, developmentPct: 0, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 4, residualScore: 12,
-      tScore: 9, category: 'Business Resilience', subCategory: 'Power Systems', riskType: 'Division Level',
-      kriName: 'Generator test pass rate', kriMeasure: 'Monthly test result', kriUnit: '%', kriTarget: 1, kriActual: 0.6, isOverdue: true,
-    },
-    {
-      id: '9', title: 'Supplier Delivery Delay Risk',
-      owner: 'Hana Blake', score: 16, rating: 'High',
-      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Add penalty clauses for late delivery.\n2. Identify backup suppliers.',
-      weekProgress: { 'Jan-2026': 0.38, 'Feb-2026': 0.28, 'Mar-2026': 0.40, 'Apr-2026': 0.34 },
-      currentPct: 34, beforePct: 40, developmentPct: -6, aboveTarget: false, belowTarget: true, likelihood: 4, impact: 4, residualScore: 12,
-      tScore: 9, category: 'Supplier Management', subCategory: 'Vendors', riskType: 'Project Level',
-      kriName: 'Supplier SLA compliance', kriMeasure: 'SLA breach count', kriUnit: '#', kriTarget: 2, kriActual: 6, isOverdue: false,
-    },
-    {
-      id: '10', title: 'Network Capacity Saturation Risk',
-      owner: 'Nora Adams', score: 25, rating: 'Very High',
-      closingDate: 'Q4 2026', progressStatus: 'In Progress (1-99%)',
-      mitigation: '1. Upgrade core network capacity.\n2. Implement traffic shaping policies.',
-      weekProgress: { 'Jan-2026': 0.30, 'Feb-2026': 0.17, 'Mar-2026': 0.29, 'Apr-2026': 0.19 },
-      currentPct: 19, beforePct: 29, developmentPct: -10, aboveTarget: false, belowTarget: true, likelihood: 5, impact: 5, residualScore: 16,
-      tScore: 12, category: 'Information Security', subCategory: 'Network', riskType: 'Division Level',
-      kriName: 'Network utilisation peak', kriMeasure: 'Peak bandwidth %', kriUnit: '%', kriTarget: 0.8, kriActual: 0.95, isOverdue: false,
-    },
-  ];
-
-  return {
-    period: 'Apr-2026',
-    weeks,
-    selectedWeek: 'Apr-2026',
-    prevWeekLabel: 'Mar-2026',
-    kpis: { totalRisks: 10, totalMitigation: 20, aboveTarget: 2, belowTarget: 8, avgRiskScore: 14, avgRiskRating: 'High' },
-    zoneCounts: { veryHigh: 3, high: 2, moderate: 3, low: 0, veryLow: 2 },
-    progressCounts: { completed: 1, inProgress: 8, notStarted: 1 },
-    riskSummary: [
-      { name: 'Above Target', value: 2, color: '#27AE60' },
-      { name: 'Below Target', value: 8, color: '#C0392B' },
-    ],
-    riskRegister: sampleRisks,
-    selectedRisk: sampleRisks[2],
-    residualData: {
-      zoneCounts: { veryHigh: 0, high: 2, moderate: 3, low: 3, veryLow: 2 },
-      avgResidualScore: 8.7,
-      avgInherentScore: 14,
-    },
-    overdueActions: {
-      count: 2,
-      items: [
-        { riskTitle: 'Access Control Compliance Risk', closingDate: 'Q1 2026', progressStatus: 'In Progress (1-99%)', currentPct: 38, owner: 'Hana Blake' },
-        { riskTitle: 'Backup Power Availability Risk', closingDate: 'Q3 2026', progressStatus: 'Not Started (0%)', currentPct: 0, owner: 'Samir Hale' },
-      ],
-    },
-    kriData: {
-      items: sampleRisks.filter(r => r.kriName).map(r => ({
-        riskTitle: r.title,
-        kriName: r.kriName,
-        kriMeasure: r.kriMeasure,
-        kriUnit: r.kriUnit,
-        kriTarget: r.kriTarget,
-        kriActual: r.kriActual,
-        status: (r.kriActual / (r.kriTarget || 1) <= 1.0 ? 'on-track' : r.kriActual / (r.kriTarget || 1) <= 1.3 ? 'at-risk' : 'breached') as 'on-track' | 'at-risk' | 'breached',
-      })),
-    },
-    taxonomyData: {
-      categories: [
-        { name: 'Supplier Management', count: 4, subCategories: [{ name: 'Process', count: 1 }, { name: 'Vendors', count: 3 }] },
-        { name: 'Business Resilience', count: 2, subCategories: [{ name: 'People', count: 1 }, { name: 'Power Systems', count: 1 }] },
-        { name: 'Compliance', count: 1, subCategories: [{ name: 'Security', count: 1 }] },
-        { name: 'Operational Excellence', count: 1, subCategories: [{ name: 'Process', count: 1 }] },
-        { name: 'Information Security', count: 1, subCategories: [{ name: 'Network', count: 1 }] },
-        { name: 'Asset Management', count: 1, subCategories: [{ name: 'Facilities', count: 1 }] },
-      ],
-      riskTypes: [
-        { name: 'Division Level', count: 5 },
-        { name: 'Project Level', count: 3 },
-        { name: 'Department Level', count: 2 },
-      ],
-    },
-    velocityData: {
-      items: sampleRisks.map(r => ({
-        title: r.title,
-        inherent: r.score,
-        residual: r.residualScore,
-        target: r.tScore,
-        gap: r.residualScore - r.tScore,
-        rating: r.rating,
-      })).sort((a, b) => b.inherent - a.inherent),
-      avgInherent: 14,
-      avgResidual: 8.7,
-      avgTarget: 6.8,
-    },
   };
 }

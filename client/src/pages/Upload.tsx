@@ -5,7 +5,7 @@
 
 import { useState, useRef, DragEvent } from 'react';
 import { Upload, FileSpreadsheet, ArrowRight, AlertCircle, Clock3, Trash2, Sun, Moon } from 'lucide-react';
-import { parseExcel, getSampleData, DashboardData } from '@/lib/excelParser';
+import { parseExcel, DashboardData } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
 
 interface PreviousUploadInfo {
@@ -69,8 +69,20 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
     if (file) handleFile(file);
   }
 
-  function loadSample() {
-    onDataLoaded(getSampleData(), 'sample_data.xlsx');
+  async function loadSample() {
+    setError('');
+    setLoading(true);
+    try {
+      const response = await fetch('/sample_data.xlsx', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Sample workbook not found');
+      const buffer = await response.arrayBuffer();
+      const data = parseExcel(buffer);
+      onDataLoaded(data, 'sample_data.xlsx');
+    } catch (e) {
+      setError('Could not read public/sample_data.xlsx. Replace that file with your sample workbook and keep it as a valid Excel file.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const pageBg = isDark ? '/assets/dark.png' : '/assets/light.png';

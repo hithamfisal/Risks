@@ -10,11 +10,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
-  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   LineChart, Line,
-  ScatterChart, Scatter, ZAxis, ReferenceLine,
-  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import {
@@ -263,6 +261,65 @@ function normalise(text: string) {
   return (text || '').toLowerCase().trim();
 }
 
+const PAGE_SIZE = 10;
+
+function riskIsOverdue(risk: RiskRow): boolean {
+  if (risk.isOverdue) return true;
+  if ((risk.currentPct || 0) >= 100) return false;
+  const due = getDateValue(risk.closingDate || '');
+  return due !== null && due < Date.now();
+}
+
+function sortDateLabels(values: string[]): string[] {
+  return [...values].sort((a, b) => {
+    const da = getDateValue(a);
+    const db = getDateValue(b);
+    if (da !== null && db !== null) return da - db;
+    if (da !== null) return -1;
+    if (db !== null) return 1;
+    return a.localeCompare(b);
+  });
+}
+
+function PaginationControls({ page, totalItems, pageSize = PAGE_SIZE, onPageChange, palette, label = 'records' }: { page: number; totalItems: number; pageSize?: number; onPageChange: (page: number) => void; palette: ThemePalette; label?: string }) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const start = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(totalItems, safePage * pageSize);
+  const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+  return (
+    <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '10px 12px', marginTop: 10, border: `1px solid ${palette.border}`, borderRadius: 12, background: palette.cardSoft }}>
+      <span style={{ color: palette.muted, fontSize: 11, fontWeight: 850 }}>
+        Showing {start}-{end} of {totalItems} {label} · 10 per page · no internal scroll
+      </span>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+        <button type="button" disabled={safePage <= 1} onClick={() => onPageChange(safePage - 1)} style={pagerButtonStyle(palette, false, safePage <= 1)}>Prev</button>
+        {pages.map(n => (
+          <button key={n} type="button" onClick={() => onPageChange(n)} style={pagerButtonStyle(palette, n === safePage)}>{n}</button>
+        ))}
+        <button type="button" disabled={safePage >= totalPages} onClick={() => onPageChange(safePage + 1)} style={pagerButtonStyle(palette, false, safePage >= totalPages)}>Next</button>
+      </div>
+    </div>
+  );
+}
+
+function pagerButtonStyle(palette: ThemePalette, active = false, disabled = false): CSSProperties {
+  return {
+    minWidth: 30,
+    height: 28,
+    borderRadius: 999,
+    border: active ? `1px solid ${SE.blue}` : `1px solid ${palette.border}`,
+    background: active ? 'linear-gradient(135deg, #0078FF 0%, #00AEEF 100%)' : palette.cardSolid,
+    color: active ? '#fff' : palette.text,
+    opacity: disabled ? 0.45 : 1,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 10,
+    fontWeight: 900,
+    padding: '0 10px',
+    fontFamily: 'DM Sans, Inter, sans-serif',
+  };
+}
+
 async function exportElementAsPNG(ref: RefObject<HTMLElement | null>, fileName: string, backgroundColor: string) {
   if (!ref.current) return;
   const html2canvas = (await import('html2canvas')).default;
@@ -321,35 +378,41 @@ function SmallActionButton({ children, onClick, title, palette, disabled = false
   );
 }
 
-function KpiTile({ label, value, isText, color, selectedWeek, index, palette }: { label: string; value: number | string; isText?: boolean; color: string; selectedWeek: string; index: number; palette: ThemePalette }) {
+function KpiTile({ label, value, isText, color, selectedWeek, index, icon, sub, isPercent = false }: { label: string; value: number | string; isText?: boolean; color: string; selectedWeek: string; index: number; icon?: ReactNode; sub?: string; isPercent?: boolean }) {
   const numeric = Number(value);
-  const ringPct = isText ? 76 : Math.max(18, Math.min(92, Number.isFinite(numeric) ? numeric : 55));
-  const displayValue = isText ? value : <AnimatedNumber animationKey={`${selectedWeek}-${index}`} value={numeric} />;
+  const ringPct = isText ? 76 : isPercent ? Math.max(18, Math.min(92, Number.isFinite(numeric) ? numeric : 55)) : Math.max(18, Math.min(92, Number.isFinite(numeric) ? numeric : 55));
+  const displayValue = isText ? value : <><AnimatedNumber animationKey={`${selectedWeek}-${index}`} value={numeric} />{isPercent ? '%' : ''}</>;
   return (
-    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 150 }}>
+    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 218 }}>
       <div
         className="kpi-orb"
         style={{
           '--kpi-color': color,
           '--kpi-ring': `${ringPct}%`,
-          width: 142,
-          height: 142,
+          width: 176,
+          height: 176,
           borderRadius: '50%',
           position: 'relative',
           display: 'grid',
           placeItems: 'center',
-          background: `conic-gradient(from 210deg, ${color} 0 var(--kpi-ring), rgba(255,255,255,.20) var(--kpi-ring) 100%)`,
-          boxShadow: `0 20px 44px rgba(0,0,0,.20), inset 0 0 0 1px rgba(255,255,255,.22)`,
-          border: '1px solid rgba(255,255,255,.24)',
+          background: `conic-gradient(from 210deg, ${color} 0 var(--kpi-ring), rgba(255,255,255,.22) var(--kpi-ring) 100%)`,
+          boxShadow: `0 24px 52px rgba(0,0,0,.24), 0 0 32px ${color}33, inset 0 0 0 1px rgba(255,255,255,.24)`,
+          border: '1px solid rgba(255,255,255,.28)',
         } as CSSProperties}
       >
-        <div style={{ position: 'absolute', inset: 9, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 2px 18px rgba(255,255,255,.16), inset 0 -18px 30px rgba(0,0,0,.22)' }} />
-        <div style={{ position: 'absolute', inset: 20, borderRadius: '50%', background: 'radial-gradient(circle at 35% 22%, rgba(255,255,255,.24), rgba(255,255,255,.06) 38%, rgba(0,0,0,.16) 100%)', border: '1px solid rgba(255,255,255,.16)' }} />
-        <div style={{ position: 'relative', width: 112, height: 112, borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 12 }}>
-          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 18 : 31, lineHeight: 1, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.04em', maxWidth: 92, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
+        <div style={{ position: 'absolute', inset: 10, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 4px 22px rgba(255,255,255,.18), inset 0 -22px 36px rgba(0,0,0,.26)' }} />
+        <div style={{ position: 'absolute', inset: 22, borderRadius: '50%', background: 'radial-gradient(circle at 35% 20%, rgba(255,255,255,.26), rgba(255,255,255,.07) 38%, rgba(0,0,0,.18) 100%)', border: '1px solid rgba(255,255,255,.18)' }} />
+        {icon && (
+          <div className="kpi-icon" style={{ position: 'absolute', top: 22, width: 38, height: 38, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,.18)', border: '1px solid rgba(255,255,255,.28)', color: '#fff', boxShadow: '0 8px 18px rgba(0,0,0,.18)' }}>
+            {icon}
+          </div>
+        )}
+        <div style={{ position: 'relative', width: 132, height: 132, borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '44px 12px 12px' }}>
+          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 20 : 38, lineHeight: 1, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.05em', maxWidth: 112, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
             {displayValue}
           </div>
-          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.90)', fontSize: 9, fontWeight: 900, marginTop: 8, textTransform: 'uppercase', letterSpacing: '.055em', lineHeight: 1.15 }}>{label}</div>
+          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.94)', fontSize: 10, fontWeight: 950, marginTop: 9, textTransform: 'uppercase', letterSpacing: '.055em', lineHeight: 1.15 }}>{label}</div>
+          {sub && <div className="kpi-sub" style={{ color: 'rgba(255,255,255,.70)', fontSize: 8.5, fontWeight: 800, marginTop: 6, lineHeight: 1.2, maxWidth: 106, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
         </div>
       </div>
     </div>
@@ -486,7 +549,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const [filterRating, setFilterRating] = useState('All');
   const [filterOwner, setFilterOwner] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
+  const [filterClosingDate, setFilterClosingDate] = useState('All');
+  const [filterTarget, setFilterTarget] = useState('All');
+  const [filterTrackStatus, setFilterTrackStatus] = useState('All');
+  const [filterCategory, setFilterCategory] = useState('All');
+  const [filterRiskType, setFilterRiskType] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [registerPage, setRegisterPage] = useState(1);
+  const [residualPage, setResidualPage] = useState(1);
+  const [velocityPage, setVelocityPage] = useState(1);
   const [residualFilterRating, setResidualFilterRating] = useState('All');
   const [residualFilterStatus, setResidualFilterStatus] = useState('All');
 
@@ -559,19 +630,70 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   const uniqueOwners = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.owner).filter(Boolean))).sort()], [riskRegister]);
   const uniqueStatuses = ['All', 'Completed (100%)', 'In Progress (1-99%)', 'Not Started (0%)'];
+  const uniqueClosingDates = useMemo(() => ['All', ...sortDateLabels(Array.from(new Set(riskRegister.map(r => r.closingDate).filter(Boolean))))], [riskRegister]);
+  const uniqueCategories = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.category || 'Uncategorised'))).sort()], [riskRegister]);
+  const uniqueRiskTypes = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.riskType || 'Unknown'))).sort()], [riskRegister]);
+  const targetOptions = ['All', 'Above Target', 'Below Target'];
+  const trackOptions = ['All', 'Overdue', 'In Track'];
 
   const filteredRisks = useMemo(() => {
     const q = normalise(searchTerm);
     return riskRegister.filter(r => {
+      const category = r.category || 'Uncategorised';
+      const riskType = r.riskType || 'Unknown';
+      const overdue = riskIsOverdue(r);
       if (filterRating !== 'All' && r.rating !== filterRating) return false;
       if (filterOwner !== 'All' && r.owner !== filterOwner) return false;
       if (filterStatus !== 'All' && r.progressStatus !== filterStatus) return false;
-      if (q && !normalise(`${r.title} ${r.mitigation} ${r.owner} ${r.rating} ${r.closingDate}`).includes(q)) return false;
+      if (filterClosingDate !== 'All' && r.closingDate !== filterClosingDate) return false;
+      if (filterTarget === 'Above Target' && !r.aboveTarget) return false;
+      if (filterTarget === 'Below Target' && !r.belowTarget) return false;
+      if (filterTrackStatus === 'Overdue' && !overdue) return false;
+      if (filterTrackStatus === 'In Track' && overdue) return false;
+      if (filterCategory !== 'All' && category !== filterCategory) return false;
+      if (filterRiskType !== 'All' && riskType !== filterRiskType) return false;
+      if (q && !normalise(`${r.title} ${r.mitigation} ${r.owner} ${r.rating} ${r.closingDate} ${category} ${riskType} ${r.progressStatus}`).includes(q)) return false;
       return true;
     });
-  }, [riskRegister, filterRating, filterOwner, filterStatus, searchTerm]);
+  }, [riskRegister, filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, searchTerm]);
 
-  const hasFilters = filterRating !== 'All' || filterOwner !== 'All' || filterStatus !== 'All' || searchTerm.trim().length > 0;
+  const filteredZoneCounts = useMemo(() => ({
+    veryHigh: filteredRisks.filter(r => r.score >= 20 || /very high/i.test(r.rating)).length,
+    high: filteredRisks.filter(r => (r.score >= 15 && r.score < 20) || (/high/i.test(r.rating) && !/very high/i.test(r.rating))).length,
+    moderate: filteredRisks.filter(r => (r.score >= 9 && r.score < 15) || /moderate/i.test(r.rating)).length,
+    low: filteredRisks.filter(r => (r.score >= 5 && r.score < 9) || (/low/i.test(r.rating) && !/very low/i.test(r.rating))).length,
+    veryLow: filteredRisks.filter(r => (r.score > 0 && r.score < 5) || /very low/i.test(r.rating)).length,
+  }), [filteredRisks]);
+
+  const filteredMitigationActions = useMemo(() => {
+    const count = filteredRisks.reduce((sum, r) => sum + (r.mitigation ? r.mitigation.split(/\n+/).filter(Boolean).length : 0), 0);
+    return count || (filteredRisks.length === riskRegister.length ? (Number(kpis.totalMitigation) || filteredRisks.length) : filteredRisks.length);
+  }, [filteredRisks, riskRegister.length, kpis.totalMitigation]);
+
+  const filteredOverallHealth = filteredRisks.length ? Math.round((filteredRisks.filter(r => r.aboveTarget).length / filteredRisks.length) * 100) : 0;
+
+  const hasFilters = filterRating !== 'All' || filterOwner !== 'All' || filterStatus !== 'All' || filterClosingDate !== 'All' || filterTarget !== 'All' || filterTrackStatus !== 'All' || filterCategory !== 'All' || filterRiskType !== 'All' || searchTerm.trim().length > 0;
+
+  useEffect(() => {
+    setRegisterPage(1);
+    setResidualPage(1);
+    setVelocityPage(1);
+  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, searchTerm, selectedWeek]);
+
+  useEffect(() => {
+    if (!filteredRisks.length) {
+      setActiveRisk(null);
+      return;
+    }
+    if (!activeRisk || !filteredRisks.some(r => r.id === activeRisk.id)) {
+      setActiveRisk(filteredRisks[0]);
+    }
+  }, [filteredRisks, activeRisk]);
+
+  const registerTotalPages = Math.max(1, Math.ceil(filteredRisks.length / PAGE_SIZE));
+  const safeRegisterPage = Math.min(registerPage, registerTotalPages);
+  const registerStartIndex = (safeRegisterPage - 1) * PAGE_SIZE;
+  const pagedRegisterRisks = filteredRisks.slice(registerStartIndex, registerStartIndex + PAGE_SIZE);
 
   const changesSummary = useMemo(() => {
     const improved = filteredRisks.filter(r => r.developmentPct > 0).length;
@@ -581,10 +703,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   }, [filteredRisks]);
 
   const professionalSummary = useMemo(() => {
-    const now = Date.now();
-    const overdue = riskRegister.filter(r => (r.currentPct || 0) < 100 && getDateValue(r.closingDate) !== null && Number(getDateValue(r.closingDate)) < now).length;
-    const completed = riskRegister.filter(r => r.currentPct >= 100 || r.progressStatus === 'Completed (100%)').length;
-    const highRisks = riskRegister.filter(r => r.score >= 15 || /high/i.test(r.rating));
+    const overdue = filteredRisks.filter(r => riskIsOverdue(r)).length;
+    const completed = filteredRisks.filter(r => r.currentPct >= 100 || r.progressStatus === 'Completed (100%)').length;
+    const highRisks = filteredRisks.filter(r => r.score >= 15 || /high/i.test(r.rating));
     const ownerCounts = highRisks.reduce<Record<string, number>>((acc, r) => {
       const owner = r.owner || 'Unassigned';
       acc[owner] = (acc[owner] || 0) + 1;
@@ -593,31 +714,20 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     const topOwnerEntry = Object.entries(ownerCounts).sort((a, b) => b[1] - a[1])[0];
     const topOwner = topOwnerEntry?.[0] ?? 'None';
     const topOwnerCount = topOwnerEntry?.[1] ?? 0;
-    const completedPct = riskRegister.length ? Math.round((completed / riskRegister.length) * 100) : 0;
+    const completedPct = filteredRisks.length ? Math.round((completed / filteredRisks.length) * 100) : 0;
     return { overdue, completed, completedPct, highRiskOwner: topOwner, highRiskOwnerCount: topOwnerCount, highRiskTotal: highRisks.length };
-  }, [riskRegister]);
-
-  const donutData = useMemo(() => [
-    { name: 'Very High', value: zoneCounts.veryHigh, displayValue: zoneCounts.veryHigh, color: ZONE_COLORS['Very High'] },
-    { name: 'High', value: zoneCounts.high, displayValue: zoneCounts.high, color: ZONE_COLORS.High },
-    { name: 'Moderate', value: zoneCounts.moderate, displayValue: zoneCounts.moderate, color: ZONE_COLORS.Moderate },
-    { name: 'Low', value: zoneCounts.low, displayValue: zoneCounts.low, color: ZONE_COLORS.Low },
-    { name: 'Very Low', value: zoneCounts.veryLow, displayValue: zoneCounts.veryLow, color: ZONE_COLORS['Very Low'] },
-  // Give 0-value slices a minimum of 0.3 so Recharts renders a thin visible arc
-  ].map(d => ({ ...d, value: d.value === 0 ? 0.3 : d.value })), [zoneCounts]);
-
-  const categoryTotal = donutData.reduce((sum, d) => sum + (d.displayValue ?? d.value), 0);
+  }, [filteredRisks]);
 
   const weeklyMovementData = useMemo(() => weeks.map((w, index) => {
-    const values = riskRegister.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
+    const values = filteredRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
     const avgProgress = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
     const completed = values.filter(value => value >= 100).length;
-    const previousValues = index > 0 ? riskRegister.map(r => Math.round((r.weekProgress[weeks[index - 1].label] ?? 0) * 100)) : values;
+    const previousValues = index > 0 ? filteredRisks.map(r => Math.round((r.weekProgress[weeks[index - 1].label] ?? 0) * 100)) : values;
     const improved = values.filter((value, i) => value > (previousValues[i] ?? value)).length;
     const declined = values.filter((value, i) => value < (previousValues[i] ?? value)).length;
-    const monthlyThreat = riskRegister.filter(r => (r.weekProgress[w.label] ?? 0) > 0).length;
+    const monthlyThreat = filteredRisks.filter(r => (r.weekProgress[w.label] ?? 0) > 0).length;
     return { week: w.label, avgProgress, completed, improved, declined, monthlyThreat };
-  }), [riskRegister, weeks]);
+  }), [filteredRisks, weeks]);
 
   // Multi-week Target vs Actual trend
   // Target = average of all risks' target (100%) weighted by how many are expected complete per week.
@@ -626,17 +736,17 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const weeklyTargetVsActualData = useMemo(() => {
     const total = weeks.length || 1;
     return weeks.map((w, index) => {
-      const values = riskRegister.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
+      const values = filteredRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
       const avgActual = values.length ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
       const avgTarget = Math.round(((index + 1) / total) * 100);
       const dev = avgActual - avgTarget;
       return { week: w.label, avgActual, avgTarget, dev };
     });
-  }, [riskRegister, weeks]);
+  }, [filteredRisks, weeks]);
 
   const ownerHighRiskData = useMemo(() => {
     const map: Record<string, { count: number; totalPct: number; highCount: number }> = {};
-    riskRegister.forEach(r => {
+    filteredRisks.forEach(r => {
       const owner = r.owner || 'Unassigned';
       if (!map[owner]) map[owner] = { count: 0, totalPct: 0, highCount: 0 };
       map[owner].count += 1;
@@ -652,48 +762,14 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
         highCount: d.highCount,
       }))
       .sort((a, b) => b.count - a.count);
-  }, [riskRegister]);
-
-  const overdueByOwnerData = useMemo(() => {
-    const now = Date.now();
-    const counts = riskRegister
-      .filter(r => (r.currentPct || 0) < 100 && getDateValue(r.closingDate) !== null && Number(getDateValue(r.closingDate)) < now)
-      .reduce<Record<string, number>>((acc, r) => {
-        const owner = r.owner || 'Unassigned';
-        acc[owner] = (acc[owner] || 0) + 1;
-        return acc;
-      }, {});
-    return Object.entries(counts)
-      .map(([owner, overdue]) => ({ owner: owner.length > 22 ? `${owner.slice(0, 22)}…` : owner, fullOwner: owner, overdue }))
-      .sort((a, b) => b.overdue - a.overdue)
-      .slice(0, 10);
-  }, [riskRegister]);
-
-  const progressData = useMemo(() => {
-    const completed  = riskRegister.filter(r => r.currentPct >= 100).length || progressCounts.completed;
-    const inProgress = riskRegister.filter(r => r.currentPct > 0 && r.currentPct < 100).length || progressCounts.inProgress;
-    const notStarted = riskRegister.filter(r => r.currentPct === 0).length || progressCounts.notStarted;
-    return [
-      { name: 'Not Started', fullName: 'Not Started (0%)', value: notStarted, color: SE.red },
-      { name: 'In Progress', fullName: 'In Progress (1-99%)', value: inProgress, color: SE.gold },
-      { name: 'Completed',   fullName: 'Completed (100%)',   value: completed,  color: SE.green },
-    ];
-  }, [riskRegister, progressCounts]);
-
-  const detailData = useMemo(() => riskRegister.map(r => ({
-    name: r.title.length > 34 ? `${r.title.slice(0, 34)}…` : r.title,
-    fullName: r.title,
-    current: r.currentPct,
-    before: r.beforePct,
-    target: 100,
-  })), [riskRegister]);
+  }, [filteredRisks]);
 
   const funnelData = useMemo(() => {
-    const total = riskRegister.length;
-    const inProgress = riskRegister.filter(r => r.currentPct > 0 && r.currentPct < 100).length;
-    const ge50 = riskRegister.filter(r => r.currentPct >= 50 && r.currentPct < 100).length;
-    const ge80 = riskRegister.filter(r => r.currentPct >= 80 && r.currentPct < 100).length;
-    const completed = riskRegister.filter(r => r.currentPct >= 100).length;
+    const total = filteredRisks.length;
+    const inProgress = filteredRisks.filter(r => r.currentPct > 0 && r.currentPct < 100).length;
+    const ge50 = filteredRisks.filter(r => r.currentPct >= 50 && r.currentPct < 100).length;
+    const ge80 = filteredRisks.filter(r => r.currentPct >= 80 && r.currentPct < 100).length;
+    const completed = filteredRisks.filter(r => r.currentPct >= 100).length;
     return [
       { label: 'Pipeline Total',   count: total,      pct: 100 },
       { label: 'In Progress',      count: inProgress, pct: total ? Math.round((inProgress / total) * 100) : 0 },
@@ -701,7 +777,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       { label: 'Progress ≥ 80%',   count: ge80,       pct: total ? Math.round((ge80 / total) * 100) : 0 },
       { label: 'Completed',        count: completed,  pct: total ? Math.round((completed / total) * 100) : 0 },
     ];
-  }, [riskRegister]);
+  }, [filteredRisks]);
 
   const selectedChartData = activeRisk ? [
     { name: 'Current %', value: activeRisk.currentPct, color: SE.green },
@@ -730,6 +806,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     setFilterRating('All');
     setFilterOwner('All');
     setFilterStatus('All');
+    setFilterClosingDate('All');
+    setFilterTarget('All');
+    setFilterTrackStatus('All');
+    setFilterCategory('All');
+    setFilterRiskType('All');
     setSearchTerm('');
   }, []);
 
@@ -767,73 +848,27 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   }, [filteredRisks, selectedWeek, period]);
 
   const residualFilteredRisks = useMemo(() => {
-    return riskRegister
+    return [...filteredRisks]
       .filter(r => r.residualScore > 0)
       .filter(r => residualFilterRating === 'All' || r.rating === residualFilterRating)
       .filter(r => residualFilterStatus === 'All' || r.progressStatus === residualFilterStatus)
       .sort((a, b) => b.residualScore - a.residualScore);
-  }, [riskRegister, residualFilterRating, residualFilterStatus]);
+  }, [filteredRisks, residualFilterRating, residualFilterStatus]);
+
+  const residualTotalPages = Math.max(1, Math.ceil(residualFilteredRisks.length / PAGE_SIZE));
+  const safeResidualPage = Math.min(residualPage, residualTotalPages);
+  const residualStartIndex = (safeResidualPage - 1) * PAGE_SIZE;
+  const pagedResidualRisks = residualFilteredRisks.slice(residualStartIndex, residualStartIndex + PAGE_SIZE);
 
   const topResidualRisks = useMemo(() =>
-    [...riskRegister]
-      .filter(r => r.residualScore > 0)
+    [...residualFilteredRisks]
       .sort((a, b) => b.residualScore - a.residualScore)
       .slice(0, 5),
-  [riskRegister]);
-
-  // ── Step 3: Monthly Threat Frequency by Category ──────────────────────────
-  const monthlyThreatData = useMemo(() => {
-    // Group risks by category, count per week/period label
-    const cats = Array.from(new Set(riskRegister.map(r => r.category || 'Uncategorized'))).slice(0, 6);
-    const catColors: Record<string, string> = {};
-    const palette6 = [SE.red, SE.orange, SE.gold, SE.blue, SE.teal, SE.green];
-    cats.forEach((c, i) => { catColors[c] = palette6[i % palette6.length]; });
-    const data = weeks.map(w => {
-      const row: Record<string, string | number> = { week: w.label };
-      cats.forEach(cat => {
-        row[cat] = riskRegister.filter(r => (r.category || 'Uncategorized') === cat && (r.weekProgress[w.label] ?? 0) > 0).length;
-      });
-      return row;
-    });
-    return { data, cats, catColors };
-  }, [riskRegister, weeks]);
-
-  // ── Step 3: Radar chart — risk score by category ──────────────────────────
-  const radarData = useMemo(() => {
-    const catMap: Record<string, { total: number; count: number }> = {};
-    riskRegister.forEach(r => {
-      const cat = r.category || 'Uncategorized';
-      if (!catMap[cat]) catMap[cat] = { total: 0, count: 0 };
-      catMap[cat].total += r.score;
-      catMap[cat].count += 1;
-    });
-    return Object.entries(catMap)
-      .map(([subject, d]) => ({ subject: subject.length > 18 ? subject.slice(0, 18) + '…' : subject, avgScore: Math.round(d.total / d.count), count: d.count }))
-      .sort((a, b) => b.avgScore - a.avgScore)
-      .slice(0, 8);
-  }, [riskRegister]);
-
-  // ── Step 3: L/I Assessment Status stacked bar ─────────────────────────────
-  const liAssessmentData = useMemo(() => {
-    const buckets: Record<string, { completed: number; inProgress: number; notStarted: number }> = {};
-    riskRegister.forEach(r => {
-      const l = Math.min(5, Math.max(1, Math.round(r.likelihood || 1)));
-      const im = Math.min(5, Math.max(1, Math.round(r.impact || 1)));
-      const key = `L${l}×I${im}`;
-      if (!buckets[key]) buckets[key] = { completed: 0, inProgress: 0, notStarted: 0 };
-      if (r.currentPct >= 100) buckets[key].completed += 1;
-      else if (r.currentPct > 0) buckets[key].inProgress += 1;
-      else buckets[key].notStarted += 1;
-    });
-    return Object.entries(buckets)
-      .map(([key, v]) => ({ key, ...v, total: v.completed + v.inProgress + v.notStarted }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10);
-  }, [riskRegister]);
+  [residualFilteredRisks]);
 
   // ── Step 9: Sparkline progression per risk ────────────────────────────────
   const sparklineRisks = useMemo(() => {
-    return [...riskRegister]
+    return [...filteredRisks]
       .sort((a, b) => b.score - a.score)
       .slice(0, 12)
       .map(r => ({
@@ -844,98 +879,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
         currentPct: r.currentPct,
         sparkData: weeks.map(w => ({ w: w.label, v: Math.round((r.weekProgress[w.label] ?? 0) * 100) })),
       }));
-  }, [riskRegister, weeks]);
-
-  // ── PDF Gap Charts: computed data ─────────────────────────────────────────
-
-  // 1. Risks per Department (pie + bar)
-  const risksByDeptData = useMemo(() => {
-    const map: Record<string, number> = {};
-    riskRegister.forEach(r => {
-      const dept = r.owner || 'Unknown';
-      map[dept] = (map[dept] || 0) + 1;
-    });
-    const colors = [SE.blue, SE.teal, SE.green, SE.gold, SE.orange, SE.red, '#9B59B6', '#1ABC9C'];
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, value], i) => ({ name, value, color: colors[i % colors.length] }));
-  }, [riskRegister]);
-
-  // 2. Actions per Department — count of mitigation action rows per owner
-  const actionsByDeptData = useMemo(() => {
-    // Each risk may have multiple actions; we approximate by using action weight count
-    // Since we don't have per-action rows, we use risk count × estimated actions per risk
-    const map: Record<string, number> = {};
-    riskRegister.forEach(r => {
-      const dept = r.owner || 'Unknown';
-      // Use totalMitigation proportionally, or just count risks as proxy
-      map[dept] = (map[dept] || 0) + 1;
-    });
-    const colors = [SE.blue, SE.teal, SE.green, SE.gold, SE.orange, SE.red, '#9B59B6', '#1ABC9C'];
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, value], i) => ({ name, value, color: colors[i % colors.length] }));
-  }, [riskRegister]);
-
-  // 3. Action Status per Department — Completed / In Progress / Overdue per dept
-  const actionStatusByDeptData = useMemo(() => {
-    const map: Record<string, { completed: number; inProgress: number; overdue: number }> = {};
-    riskRegister.forEach(r => {
-      const dept = r.owner || 'Unknown';
-      if (!map[dept]) map[dept] = { completed: 0, inProgress: 0, overdue: 0 };
-      if (r.currentPct >= 100) map[dept].completed += 1;
-      else if (r.isOverdue) map[dept].overdue += 1;
-      else if (r.currentPct > 0) map[dept].inProgress += 1;
-      else map[dept].inProgress += 1;
-    });
-    return Object.entries(map)
-      .sort((a, b) => (b[1].completed + b[1].inProgress + b[1].overdue) - (a[1].completed + a[1].inProgress + a[1].overdue))
-      .map(([dept, v]) => ({ dept, ...v }));
-  }, [riskRegister]);
-
-  // 4. Overall Action Completion Donut
-  const overallActionDonutData = useMemo(() => {
-    const completed = riskRegister.filter(r => r.currentPct >= 100).length;
-    const overdue = riskRegister.filter(r => r.isOverdue && r.currentPct < 100).length;
-    const inProgress = riskRegister.length - completed - overdue;
-    return [
-      { name: 'Completed', value: completed, color: SE.green },
-      { name: 'In Progress', value: Math.max(0, inProgress), color: SE.gold },
-      { name: 'Overdue', value: overdue, color: SE.red },
-    ].filter(d => d.value > 0);
-  }, [riskRegister]);
-
-  // 5. Risk Priority per Department — stacked bar (Very High / High / Moderate / Low / Very Low)
-  const priorityByDeptData = useMemo(() => {
-    const map: Record<string, { veryHigh: number; high: number; moderate: number; low: number; veryLow: number }> = {};
-    riskRegister.forEach(r => {
-      const dept = r.owner || 'Unknown';
-      if (!map[dept]) map[dept] = { veryHigh: 0, high: 0, moderate: 0, low: 0, veryLow: 0 };
-      const rating = (r.rating || '').toLowerCase();
-      if (rating.includes('very high') || r.score >= 20) map[dept].veryHigh += 1;
-      else if (rating.includes('very low') || r.score < 5) map[dept].veryLow += 1;
-      else if (rating.includes('high') || r.score >= 15) map[dept].high += 1;
-      else if (rating.includes('moderate') || r.score >= 9) map[dept].moderate += 1;
-      else map[dept].low += 1;
-    });
-    return Object.entries(map)
-      .sort((a, b) => (b[1].veryHigh + b[1].high) - (a[1].veryHigh + a[1].high))
-      .map(([dept, v]) => ({ dept, ...v }));
-  }, [riskRegister]);
-
-  // 6. Sector-wide Risk Level distribution bar
-  const sectorRiskLevelData = useMemo(() => [
-    { name: 'Very High', value: zoneCounts.veryHigh, color: ZONE_COLORS['Very High'] },
-    { name: 'High', value: zoneCounts.high, color: ZONE_COLORS.High },
-    { name: 'Moderate', value: zoneCounts.moderate, color: ZONE_COLORS.Moderate },
-    { name: 'Low', value: zoneCounts.low, color: ZONE_COLORS.Low },
-    { name: 'Very Low', value: zoneCounts.veryLow, color: ZONE_COLORS['Very Low'] },
-  ], [zoneCounts]);
+  }, [filteredRisks, weeks]);
 
   // 7. Inherent vs Residual vs Target per Department
   const inherentResidualByDeptData = useMemo(() => {
     const map: Record<string, { inherentSum: number; residualSum: number; targetSum: number; count: number }> = {};
-    riskRegister.forEach(r => {
+    filteredRisks.forEach(r => {
       const dept = r.owner || 'Unknown';
       if (!map[dept]) map[dept] = { inherentSum: 0, residualSum: 0, targetSum: 0, count: 0 };
       map[dept].inherentSum += r.score || 0;
@@ -951,21 +900,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
         residual: parseFloat((v.residualSum / v.count).toFixed(1)),
         target: parseFloat((v.targetSum / v.count).toFixed(1)),
       }));
-  }, [riskRegister]);
-
-  // 8. Inherent vs Residual — Overall sector single bar
-  const inherentResidualOverallData = useMemo(() => {
-    const total = riskRegister.length || 1;
-    const avgInherent = parseFloat((riskRegister.reduce((s, r) => s + (r.score || 0), 0) / total).toFixed(1));
-    const avgResidual = parseFloat((riskRegister.reduce((s, r) => s + (r.residualScore || r.score || 0), 0) / total).toFixed(1));
-    const avgTarget = parseFloat((riskRegister.reduce((s, r) => s + (r.tScore || 0), 0) / total).toFixed(1));
-    return [{ name: 'Telecom Overall', inherent: avgInherent, residual: avgResidual, target: avgTarget }];
-  }, [riskRegister]);
+  }, [filteredRisks]);
 
   // 9. Actual vs Target per Department
   const actualVsTargetByDeptData = useMemo(() => {
     const map: Record<string, { actualSum: number; count: number }> = {};
-    riskRegister.forEach(r => {
+    filteredRisks.forEach(r => {
       const dept = r.owner || 'Unknown';
       if (!map[dept]) map[dept] = { actualSum: 0, count: 0 };
       map[dept].actualSum += r.currentPct;
@@ -979,7 +919,33 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
         actual: Math.round(v.actualSum / v.count),
         target: targetPct,
       }));
-  }, [riskRegister]);
+  }, [filteredRisks]);
+
+  const velocityItems = useMemo(() => [...filteredRisks]
+    .filter(r => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(r => ({
+      title: r.title,
+      inherent: r.score,
+      residual: r.residualScore ?? 0,
+      target: r.tScore ?? 0,
+      gap: (r.residualScore ?? 0) - (r.tScore ?? 0),
+      rating: r.rating,
+    })), [filteredRisks]);
+
+  const velocityTotalPages = Math.max(1, Math.ceil(velocityItems.length / PAGE_SIZE));
+  const safeVelocityPage = Math.min(velocityPage, velocityTotalPages);
+  const velocityStartIndex = (safeVelocityPage - 1) * PAGE_SIZE;
+  const pagedVelocityItems = velocityItems.slice(velocityStartIndex, velocityStartIndex + PAGE_SIZE);
+
+  const velocitySummary = useMemo(() => {
+    const scoreRows = velocityItems.filter(v => v.inherent > 0);
+    const avgInherent = scoreRows.length ? Math.round(scoreRows.reduce((sum, v) => sum + v.inherent, 0) / scoreRows.length * 10) / 10 : 0;
+    const avgResidual = scoreRows.length ? Math.round(scoreRows.reduce((sum, v) => sum + v.residual, 0) / scoreRows.length * 10) / 10 : 0;
+    const targets = scoreRows.filter(v => v.target > 0);
+    const avgTarget = targets.length ? Math.round(targets.reduce((sum, v) => sum + v.target, 0) / targets.length * 10) / 10 : 0;
+    return { avgInherent, avgResidual, avgTarget };
+  }, [velocityItems]);
 
   // ── Tabbed Risk Log state (Step 5) ────────────────────────────────────────
   const [riskLogTab, setRiskLogTab] = useState<'all' | 'high' | 'overdue' | 'search'>('all');
@@ -990,20 +956,20 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   const riskLogFiltered = useMemo(() => {
     const q = normalise(riskLogSearch);
-    return riskRegister.filter(r => {
+    return filteredRisks.filter(r => {
       if (riskLogTab === 'high') return r.score >= 15 || /high/i.test(r.rating);
-      if (riskLogTab === 'overdue') return r.isOverdue;
+      if (riskLogTab === 'overdue') return riskIsOverdue(r);
       if (riskLogTab === 'search') return q ? normalise(`${r.title} ${r.mitigation} ${r.owner}`).includes(q) : true;
       return true;
     });
-  }, [riskRegister, riskLogTab, riskLogSearch]);
+  }, [filteredRisks, riskLogTab, riskLogSearch]);
 
   // ── Bottom 4-tab register state (Step 8) ─────────────────────────────────
   const [bottomTab, setBottomTab] = useState<'all' | 'high' | 'overdue' | 'search'>('all');
   const [bottomSearch, setBottomSearch] = useState('');
 
   const visibleSectionIds = useMemo(() => {
-    return ['kpi-section', 'summary-section', 'charts-section', 'risks-actions-section', 'dept-risk-level-section', 'dept-performance-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section', 'bottom-register-section', 'sparkline-section'];
+    return ['kpi-section', 'charts-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section'];
   }, []);
 
   const allSectionsExpanded = visibleSectionIds.every(id => sectionOpen[id]);
@@ -1014,7 +980,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   const toggleAllSections = useCallback(() => {
     setSectionOpen(prev => {
-      const visibleIds = ['kpi-section', 'summary-section', 'charts-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section', 'bottom-register-section', 'sparkline-section'];
+      const visibleIds = ['kpi-section', 'charts-section', 'pipeline-section', 'risk-register-section', 'risk-log-section', 'residual-analysis-section', 'overdue-section', 'kri-section', 'velocity-section', 'taxonomy-section'];
       const shouldExpand = !visibleIds.every(id => prev[id]);
       return visibleIds.reduce((acc, id) => ({ ...acc, [id]: shouldExpand }), prev);
     });
@@ -1048,9 +1014,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           main { max-width: 100% !important; padding: 6px 8px !important; gap: 6px !important; }
           .dashboard-section { break-inside: avoid; box-shadow: none !important; border-radius: 8px !important; }
           .kpi-row { grid-template-columns: repeat(6, 1fr) !important; gap: 5px !important; }
-          .kpi-tile { min-height: 110px !important; }
-          .kpi-orb { width: 108px !important; height: 108px !important; }
-          .kpi-value { font-size: 20px !important; }
+          .kpi-tile { min-height: 126px !important; }
+          .kpi-orb { width: 122px !important; height: 122px !important; }
+          .kpi-value { font-size: 23px !important; }
           .kpi-label { font-size: 7px !important; }
           .chart-row { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important; }
           .professional-chart-grid { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important; }
@@ -1062,7 +1028,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           .recharts-wrapper, .recharts-surface { overflow: visible !important; }
         }
         @media (max-width: 1180px) { .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } .professional-chart-grid, .professional-chart-wide { grid-template-columns: 1fr !important; } }
-        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-orb { width: 126px !important; height: 126px !important; } }
+        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-orb { width: 148px !important; height: 148px !important; } }
       `}</style>
 
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
@@ -1206,8 +1172,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
           <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', gap: 6, alignItems: 'center', overflowX: 'auto', padding: '10px 0 12px', backdropFilter: 'blur(16px)', background: isDark ? 'linear-gradient(180deg, rgba(2,6,23,.82), rgba(2,6,23,.46))' : 'linear-gradient(180deg, rgba(248,251,255,.90), rgba(248,251,255,.58))', borderBottom: `1px solid ${palette.border}`, marginBottom: 2 }}>
             {([
-              { id: 'overview', label: 'Overview', count: normalizedKpis.totalRisks },
-              { id: 'register', label: 'Risk Register', count: riskRegister.length },
+              { id: 'overview', label: 'Overview', count: filteredRisks.length },
+              { id: 'register', label: 'Risk Register', count: filteredRisks.length },
               { id: 'analytics', label: 'Analytics' },
               { id: 'mitigation', label: 'Mitigation & Actions', count: professionalSummary.overdue },
               { id: 'residual', label: 'Residual & KRIs', count: kriData?.items?.length ?? 0 },
@@ -1227,50 +1193,47 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             })}
           </div>
 
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: 10, borderRadius: 16, background: palette.card, border: `1px solid ${palette.border}`, boxShadow: palette.shadow, backdropFilter: 'blur(14px)' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 950, marginRight: 2 }}><Filter size={13} />Global Filters</span>
+            <select value={filterRating} onChange={e => setFilterRating(e.target.value)} style={selectStyle}>{uniqueRatings.map(r => <option key={r} value={r}>{r === 'All' ? 'All Ratings' : r}</option>)}</select>
+            <select value={filterOwner} onChange={e => setFilterOwner(e.target.value)} style={selectStyle}>{uniqueOwners.map(o => <option key={o} value={o}>{o === 'All' ? 'All Owners' : o}</option>)}</select>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={selectStyle}>{uniqueStatuses.map(s => <option key={s} value={s}>{s === 'All' ? 'All Progress Statuses' : s}</option>)}</select>
+            <select value={filterClosingDate} onChange={e => setFilterClosingDate(e.target.value)} style={selectStyle}>{uniqueClosingDates.map(d => <option key={d} value={d}>{d === 'All' ? 'All Closing Dates' : d}</option>)}</select>
+            <select value={filterTarget} onChange={e => setFilterTarget(e.target.value)} style={selectStyle}>{targetOptions.map(t => <option key={t} value={t}>{t === 'All' ? 'All Target Status' : t}</option>)}</select>
+            <select value={filterTrackStatus} onChange={e => setFilterTrackStatus(e.target.value)} style={selectStyle}>{trackOptions.map(t => <option key={t} value={t}>{t === 'All' ? 'Overdue + In Track' : t}</option>)}</select>
+            <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} style={selectStyle}>{uniqueCategories.map(c => <option key={c} value={c}>{c === 'All' ? 'All Risk Categories' : c}</option>)}</select>
+            <select value={filterRiskType} onChange={e => setFilterRiskType(e.target.value)} style={selectStyle}>{uniqueRiskTypes.map(t => <option key={t} value={t}>{t === 'All' ? 'All Risk Types' : t}</option>)}</select>
+            {hasFilters && <button onClick={resetFilters} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.border}`, borderRadius: 999, background: palette.cardSolid, color: palette.text, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}><RotateCcw size={12} />Clear</button>}
+            <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 850, whiteSpace: 'nowrap' }}>Filtered {filteredRisks.length} of {riskRegister.length}</span>
+          </div>
+
           {activeMainTab === 'overview' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
 
 
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
 
-            {/* ── ROW 1: 5 large orb KPI tiles matching proposal ── */}
-            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
+            {/* ── ROW 1: large circular KPI cards with the rectangular-version icons ── */}
+            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 12, alignItems: 'center' }}>
               {[
-                { label: 'Total Risks',        value: normalizedKpis.totalRisks,                                                                                                                    color: SE.blue,   icon: <Layers size={22} />,        sub: `${selectedWeek}` },
-                { label: 'Active Threats',     value: zoneCounts.veryHigh + zoneCounts.high,                                                                                                        color: SE.red,    icon: <AlertTriangle size={22} />,  sub: 'High + Very High' },
-                { label: 'High Severity',      value: zoneCounts.veryHigh,                                                                                                                          color: SE.orange, icon: <Activity size={22} />,       sub: 'Very High zone' },
-                { label: 'Overdue Actions',    value: professionalSummary.overdue,                                                                                                                  color: '#eab308', icon: <Target size={22} />,          sub: 'Past closing date' },
-                { label: 'Overall Risk Health',value: normalizedKpis.aboveTarget && normalizedKpis.totalRisks ? Math.round((normalizedKpis.aboveTarget / normalizedKpis.totalRisks) * 100) : 0,    color: SE.green,  icon: <TrendingUp size={22} />,     sub: `${normalizedKpis.aboveTarget ?? 0} of ${normalizedKpis.totalRisks ?? 0} on target`, isPercent: true },
+                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={21} />, sub: `${selectedWeek}` },
+                { label: 'Active Threats', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={21} />, sub: 'High + Very High' },
+                { label: 'High Severity', value: filteredZoneCounts.veryHigh, color: SE.orange, icon: <Activity size={21} />, sub: 'Very High zone' },
+                { label: 'Overdue', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={21} />, sub: 'Past closing date' },
+                { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={21} />, sub: 'Filtered action count' },
+                { label: 'Overall Risk Health', value: filteredOverallHealth, color: SE.green, icon: <TrendingUp size={21} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} of ${filteredRisks.length} on target`, isPercent: true },
               ].map((card, i) => (
-                <div key={card.label} style={{
-                  background: isDark ? 'rgba(7,24,54,0.88)' : 'rgba(255,255,255,0.92)',
-                  border: `1px solid ${card.color}44`,
-                  borderRadius: 16,
-                  padding: '18px 16px 14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 10,
-                  position: 'relative',
-                  overflow: 'hidden',
-                  minHeight: 160,
-                  boxShadow: `0 4px 24px ${card.color}22`,
-                }}>
-                  {/* Colored top accent bar */}
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: card.color, borderRadius: '16px 16px 0 0' }} />
-                  {/* Icon circle */}
-                  <div style={{ width: 52, height: 52, borderRadius: '50%', background: `${card.color}22`, border: `2px solid ${card.color}55`, display: 'grid', placeItems: 'center', color: card.color }}>
-                    {card.icon}
-                  </div>
-                  {/* Value */}
-                  <div style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: 38, lineHeight: 1, color: card.color, letterSpacing: '-0.04em' }}>
-                    <AnimatedNumber value={Number(card.value)} animationKey={`kpi-${selectedWeek}-${i}`} />{card.isPercent ? '%' : ''}
-                  </div>
-                  {/* Label */}
-                  <div style={{ color: palette.text, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em', textAlign: 'center', lineHeight: 1.3 }}>{card.label}</div>
-                  {/* Sub text */}
-                  <div style={{ color: palette.muted, fontSize: 9.5, textAlign: 'center', lineHeight: 1.4 }}>{card.sub}</div>
-                </div>
+                <KpiTile
+                  key={card.label}
+                  label={card.label}
+                  value={card.value}
+                  color={card.color}
+                  icon={card.icon}
+                  sub={card.sub}
+                  isPercent={card.isPercent}
+                  selectedWeek={selectedWeek}
+                  index={i}
+                />
               ))}
             </div>
 
@@ -1294,66 +1257,17 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
           {activeMainTab === 'analytics' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
-          <SectionCard id="charts-section" title="Analytics — Relationship Layout" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
+          <SectionCard id="charts-section" title="Analytics — Clean Relationship Layout" palette={palette} bodyRef={chartsRef} open={sectionOpen['charts-section']} onOpenChange={open => setSingleSectionOpen('charts-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(chartsRef, 'Risk_Analytics_Charts.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 14, padding: '10px 12px', borderRadius: 12, background: palette.cardSoft, border: `1px solid ${palette.border}` }}>
-              <div style={{ fontSize: 11, color: palette.muted, fontWeight: 800 }}>Charts are grouped by decision relationship: posture → exposure → movement → mitigation performance. Duplicated overview/KPI cards were removed.</div>
-              <span style={{ fontSize: 10, color: SE.blue, fontWeight: 900 }}>Overview is now KPI-only</span>
+              <div style={{ fontSize: 11, color: palette.muted, fontWeight: 800 }}>Duplicated charts were removed. This tab now follows one decision flow: posture → exposure → movement → mitigation performance.</div>
+              <span style={{ fontSize: 10, color: SE.blue, fontWeight: 900 }}>Overview remains KPI-only</span>
             </div>
 
-            {/* ═══════════════════════════════════════════════════════════════════════════════ */}
-            {/* SECTION A: Strategic Risk Snapshot                                             */}
-            {/* Layout: 3 columns — col1: gauge+donut | col2: heatmap | col3: dept bar + L/I  */}
-            {/* ═══════════════════════════════════════════════════════════════════════════════ */}
-            <h2 style={{ fontSize: 18, fontWeight: 900, color: palette.text, fontFamily: 'DM Sans, sans-serif', margin: '0 0 12px 0', letterSpacing: '-0.01em' }}>1. Risk Posture Relationship</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr', gap: 12, marginBottom: 20 }}>
-
-              {/* ── Col 1: Overview & Posture — gauge + donut side by side ── */}
-              <div style={{ ...chartBox(palette), display: 'flex', flexDirection: 'column', gap: 0 }}>
-                <h3 style={chartTitle(palette)}>Overview &amp; Posture</h3>
-                {/* Gauge + Donut side by side */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flex: 1 }}>
-                  {/* Half-circle gauge */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <ProgressGauge score={kpis.avgRiskScore} palette={palette} />
-                  </div>
-                  {/* Category donut */}
-                  <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                    <ResponsiveContainer width="100%" height={160}>
-                      <PieChart>
-                        <Pie data={donutData} cx="50%" cy="50%" innerRadius={42} outerRadius={66} paddingAngle={2} dataKey="value" animationDuration={650} labelLine={false} minAngle={8}
-                          label={({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) => {
-                            if (!value || value <= 0.3) return null;
-                            const r = innerRadius + (outerRadius - innerRadius) * 0.55;
-                            const x = cx + r * Math.cos(-midAngle * Math.PI / 180);
-                            const y = cy + r * Math.sin(-midAngle * Math.PI / 180);
-                            return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 11, fontWeight: 950, fill: 'white' }}>{value}</text>;
-                          }}>
-                          {donutData.map((d, i) => <Cell key={i} fill={d.color} stroke={palette.cardSolid} strokeWidth={2} />)}
-                        </Pie>
-                        <Tooltip content={<ChartTooltip palette={palette} />} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center', pointerEvents: 'none' }}>
-                      <div style={{ color: SE.red, fontSize: 22, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, lineHeight: 1 }}>{categoryTotal}</div>
-                      <div style={{ color: palette.muted, fontSize: 8, fontWeight: 800 }}>TOTAL</div>
-                    </div>
-                  </div>
-                </div>
-                {/* Shared legend */}
-                <div style={{ ...legendStyle, marginTop: 6 }}>{donutData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 8, height: 8, borderRadius: 999, background: d.color }} />{d.name}</span>)}</div>
-                {/* Summary bullets */}
-                <div style={{ marginTop: 10, borderTop: `1px solid ${palette.border}`, paddingTop: 8, fontSize: 10, color: palette.muted, lineHeight: 1.6 }}>
-                  <p style={{ margin: '0 0 4px' }}><strong style={{ color: palette.text }}>Strategic &amp; Posture:</strong> Consolidate high-level metrics and core visualisation.</p>
-                  <p style={{ margin: '0 0 4px' }}><strong style={{ color: palette.text }}>Posture:</strong> Management summary of risks ({normalizedKpis.totalRisks} total risks).</p>
-                  <p style={{ margin: 0 }}><strong style={{ color: palette.text }}>Summary Posture:</strong> Maintain senior-level overview of risk quality responsibility.</p>
-                </div>
-              </div>
-
-              {/* ── Col 2: Risk Matrix Heatmap ── */}
+            <h2 style={analyticsGroupTitle(palette)}>1. Risk Posture Relationship</h2>
+            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 12, marginBottom: 20 }}>
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>Risk Matrix Heatmap</h3>
-                {/* Legend row */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginBottom: 8 }}>
                   {[['Very High (20-25)', ZONE_COLORS['Very High']], ['High (15-19)', ZONE_COLORS.High], ['Moderate (8-14)', ZONE_COLORS.Moderate], ['Low (2-4)', ZONE_COLORS.Low], ['Very Low (1-4)', ZONE_COLORS['Very Low']]].map(([l, c]) => (
                     <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: palette.muted }}>
@@ -1361,149 +1275,138 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     </span>
                   ))}
                 </div>
-                <RiskHeatMap risks={riskRegister} palette={palette} isDark={isDark} />
+                <RiskHeatMap risks={filteredRisks} palette={palette} isDark={isDark} />
                 <p style={{ fontSize: 9, color: palette.muted, marginTop: 6, lineHeight: 1.5 }}>
-                  <strong>Score Matrix Reference:</strong> Score = Likelihood × Impact, hover over any cell to see the risks plotted there.
+                  <strong>Score Matrix Reference:</strong> Score = Likelihood × Impact. This is the primary risk concentration view.
                 </p>
               </div>
 
-              {/* ── Col 3: Risk Distribution by Department (top) + L/I Assessment Status (bottom) ── */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Risk Distribution by Department */}
-                <div style={{ ...chartBox(palette), flex: 1 }}>
-                  <h3 style={chartTitle(palette)}>Risk Distribution by Department</h3>
-                  <ResponsiveContainer width="100%" height={170}>
-                    <BarChart data={ownerHighRiskData.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 36, left: 4, bottom: 4 }} barCategoryGap="20%">
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-                      <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                      <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={90} axisLine={false} tickLine={false} />
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                      <Bar dataKey="count" name="Risk Count" fill={SE.blue} radius={[0, 5, 5, 0]} animationDuration={650}
-                        label={{ position: 'right', fontSize: 9, fontWeight: 700, fill: SE.blue, formatter: (v: number) => v }}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-
-                {/* L/I Assessment Status */}
-                <div style={{ ...chartBox(palette), flex: 1 }}>
-                  <h3 style={chartTitle(palette)}>L/I Assessment Status</h3>
-                  {liAssessmentData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={160}>
-                      <BarChart data={liAssessmentData} layout="vertical" margin={{ top: 4, right: 20, left: 6, bottom: 4 }} barCategoryGap="20%">
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-                        <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                        <YAxis type="category" dataKey="key" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={48} axisLine={false} tickLine={false} />
-                        <Tooltip content={<ChartTooltip palette={palette} />} />
-                        <Bar dataKey="notStarted" name="Not Started" stackId="s" fill={SE.red} animationDuration={650} />
-                        <Bar dataKey="inProgress" name="In Progress" stackId="s" fill={SE.gold} animationDuration={650} />
-                        <Bar dataKey="completed" name="Completed" stackId="s" fill={SE.green} radius={[0, 4, 4, 0]} animationDuration={650} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div style={{ height: 160, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 11 }}>No L/I data</div>
-                  )}
-                  <div style={legendStyle}>
-                    <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.red }} />Not Started</span>
-                    <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.gold }} />In Progress</span>
-                    <span style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 3, background: SE.green }} />Completed</span>
-                  </div>
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Average Risk Score Gauge</h3>
+                <ProgressGauge score={kpis.avgRiskScore} palette={palette} />
+                <div style={{ marginTop: 4, borderTop: `1px solid ${palette.border}`, paddingTop: 10, fontSize: 10.5, color: palette.muted, lineHeight: 1.55 }}>
+                  <strong style={{ color: palette.text }}>Purpose:</strong> one posture score to support executive escalation before drilling into owners, departments, and mitigations.
                 </div>
               </div>
             </div>
 
-            {/* ═══════════════════════════════════════════════════════════════════════════════ */}
-            {/* SECTION B: Risk Trends & Process Status                                        */}
-            {/* Layout: 2 columns — col1 (wide): multi-line trend | col2: stacked bars         */}
-            {/* ═══════════════════════════════════════════════════════════════════════════════ */}
-            <h2 style={{ fontSize: 18, fontWeight: 900, color: palette.text, fontFamily: 'DM Sans, sans-serif', margin: '0 0 12px 0', letterSpacing: '-0.01em' }}>3. Movement &amp; Threat Frequency Relationship</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 20 }}>
+            <h2 style={analyticsGroupTitle(palette)}>2. Exposure & Ownership Relationship</h2>
+            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 12, marginBottom: 20 }}>
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Owner Risk Load</h3>
+                <ResponsiveContainer width="100%" height={Math.max(230, ownerHighRiskData.length * 30)}>
+                  <BarChart data={ownerHighRiskData.slice(0, 10)} layout="vertical" margin={{ top: 4, right: 42, left: 4, bottom: 4 }} barCategoryGap="20%">
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+                    <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={106} axisLine={false} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="count" name="Risk Count" fill={SE.blue} radius={[0, 5, 5, 0]} animationDuration={650}
+                      label={{ position: 'right', fontSize: 9, fontWeight: 700, fill: SE.blue, formatter: (v: number) => v }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
 
-              {/* ── Col 1 (wide): Monthly Threat & Progress Trends multi-line chart ── */}
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Department Risk Index — Inherent vs Residual vs Target</h3>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={inherentResidualByDeptData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }} barCategoryGap="20%" barGap={3}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                    <XAxis dataKey="dept" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: palette.muted }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="inherent" name="Avg Inherent" fill={SE.red} radius={[3, 3, 0, 0]} animationDuration={650} />
+                    <Bar dataKey="residual" name="Avg Residual" fill={SE.orange} radius={[3, 3, 0, 0]} animationDuration={650} />
+                    <Bar dataKey="target" name="Avg Target" fill={SE.green} radius={[3, 3, 0, 0]} animationDuration={650} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div style={legendStyle}>
+                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.red, borderRadius: 2 }} />Avg Inherent</span>
+                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.orange, borderRadius: 2 }} />Avg Residual</span>
+                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.green, borderRadius: 2 }} />Avg Target</span>
+                </div>
+              </div>
+            </div>
+
+            <h2 style={analyticsGroupTitle(palette)}>3. Movement & Progression Relationship</h2>
+            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: sparklineRisks.length > 0 && weeks.length > 1 ? '1.2fr 1fr' : '1fr', gap: 12, marginBottom: 20 }}>
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>Monthly Threat &amp; Progress Trends</h3>
-                {weeklyMovementData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <LineChart data={weeklyMovementData} margin={{ top: 10, right: 20, left: 0, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                      <XAxis dataKey="week" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: palette.muted }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                      <Line type="monotone" dataKey="avgProgress" name="Avg Progress" stroke={SE.blue} strokeWidth={2.5} dot={{ r: 4, fill: SE.blue }} activeDot={{ r: 6 }} />
-                      <Line type="monotone" dataKey="completed" name="Completed" stroke={SE.green} strokeWidth={2} dot={{ r: 3, fill: SE.green }} />
-                      <Line type="monotone" dataKey="declined" name="Declined" stroke={SE.red} strokeWidth={2} dot={{ r: 3, fill: SE.red }} />
-                      <Line type="monotone" dataKey="monthlyThreat" name="Monthly Threat Frequency" stroke={SE.teal} strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 3, fill: SE.teal }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{ height: 260, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 12 }}>No weekly trend data — upload an Excel file to populate</div>
-                )}
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={weeklyMovementData} margin={{ top: 10, right: 20, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                    <XAxis dataKey="week" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Line type="monotone" dataKey="critical" name="Very High" stroke={SE.red} strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} animationDuration={650} />
+                    <Line type="monotone" dataKey="high" name="High" stroke={SE.orange} strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} animationDuration={650} />
+                    <Line type="monotone" dataKey="overallProgress" name="Avg Progress %" stroke={SE.green} strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} animationDuration={650} />
+                  </LineChart>
+                </ResponsiveContainer>
                 <div style={legendStyle}>
-                  {[[SE.blue,'Avg Progress'],[SE.green,'Completed'],[SE.red,'Declined'],[SE.teal,'Monthly Threat Frequency']].map(([c,l])=>
-                    <span key={l} style={legendItem(palette)}><span style={{width:12,height:4,borderRadius:2,background:c}}/>{l}</span>
-                  )}
+                  <span style={legendItem(palette)}><span style={{ width: 10, height: 3, background: SE.red, borderRadius: 2 }} />Very High</span>
+                  <span style={legendItem(palette)}><span style={{ width: 10, height: 3, background: SE.orange, borderRadius: 2 }} />High</span>
+                  <span style={legendItem(palette)}><span style={{ width: 10, height: 3, background: SE.green, borderRadius: 2 }} />Avg Progress %</span>
                 </div>
               </div>
 
-              {/* ── Col 2: Strategic Risk Snapshot (stacked bar by category) + Monthly Threat Frequency ── */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Strategic Risk Snapshot — grouped bar by category per week */}
-                <div style={{ ...chartBox(palette), flex: 1 }}>
-                  <h3 style={chartTitle(palette)}>Strategic Risk Snapshot</h3>
-                  {monthlyThreatData.data.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={150}>
-                      <BarChart data={monthlyThreatData.data} margin={{ top: 6, right: 10, left: 0, bottom: 4 }} barCategoryGap="25%">
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                        <XAxis dataKey="week" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                        <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                        <Tooltip content={<ChartTooltip palette={palette} />} />
-                        {monthlyThreatData.cats.map(cat => (
-                          <Bar key={cat} dataKey={cat} stackId="a" fill={monthlyThreatData.catColors[cat]} animationDuration={650} />
-                        ))}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div style={{ height: 150, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 11 }}>No data</div>
-                  )}
-                  <div style={legendStyle}>{monthlyThreatData.cats.slice(0, 5).map(cat => <span key={cat} style={legendItem(palette)}><span style={{ width: 8, height: 8, borderRadius: 2, background: monthlyThreatData.catColors[cat] }} />{cat.length > 14 ? cat.slice(0, 14) + '…' : cat}</span>)}</div>
+              {sparklineRisks.length > 0 && weeks.length > 1 && (
+                <div style={chartBox(palette)}>
+                  <h3 style={chartTitle(palette)}>Risk Change Progression</h3>
+                  <div style={{ border: `1px solid ${palette.border}`, borderRadius: 12, overflow: 'hidden', maxHeight: 300, overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                        <tr style={{ background: palette.tableHead, color: 'white' }}>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Risk Title</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Score</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Trend</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sparklineRisks.map((r, i) => {
+                          const maxV = Math.max(100, ...r.sparkData.map(d => d.v));
+                          const sparkW = 150;
+                          const sparkH = 30;
+                          const pts = r.sparkData.map((d, j) => {
+                            const x = sparkW * (j / Math.max(1, r.sparkData.length - 1));
+                            const y = sparkH - (d.v / maxV) * (sparkH - 4) - 2;
+                            return `${x},${y}`;
+                          }).join(' ');
+                          const lastV = r.sparkData[r.sparkData.length - 1]?.v ?? 0;
+                          const firstV = r.sparkData[0]?.v ?? 0;
+                          const trend = lastV > firstV ? SE.green : lastV < firstV ? SE.red : palette.muted;
+                          return (
+                            <tr key={r.id} style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid }}>
+                              <td style={{ padding: '8px 12px', color: palette.text, fontWeight: 700, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, color: getScoreColor(r.score) }}>{r.score}</td>
+                              <td style={{ padding: '8px 10px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <svg width={sparkW} height={sparkH} viewBox={`0 0 ${sparkW} ${sparkH}`} style={{ overflow: 'visible' }}>
+                                    <polyline points={pts} fill="none" stroke={trend} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                                    {r.sparkData.map((d, j) => {
+                                      const x = sparkW * (j / Math.max(1, r.sparkData.length - 1));
+                                      const y = sparkH - (d.v / maxV) * (sparkH - 4) - 2;
+                                      return <circle key={j} cx={x} cy={y} r={2.4} fill={trend} />;
+                                    })}
+                                  </svg>
+                                  <span style={{ fontSize: 10, fontWeight: 900, color: trend, minWidth: 28 }}>{lastV > firstV ? '↑' : lastV < firstV ? '↓' : '→'} {Math.abs(lastV - firstV)}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-
-                {/* Monthly Threat Frequency by Category — stacked bar */}
-                <div style={{ ...chartBox(palette), flex: 1 }}>
-                  <h3 style={chartTitle(palette)}>Monthly Threat Frequency by Category</h3>
-                  {monthlyThreatData.data.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={150}>
-                      <BarChart data={monthlyThreatData.data} margin={{ top: 6, right: 10, left: 0, bottom: 4 }} barCategoryGap="25%">
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                        <XAxis dataKey="week" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                        <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                        <Tooltip content={<ChartTooltip palette={palette} />} />
-                        {monthlyThreatData.cats.map(cat => (
-                          <Bar key={cat} dataKey={cat} stackId="b" fill={monthlyThreatData.catColors[cat]} animationDuration={650} />
-                        ))}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div style={{ height: 150, display: 'grid', placeItems: 'center', color: palette.muted, fontSize: 11 }}>No data</div>
-                  )}
-                  <div style={legendStyle}>{monthlyThreatData.cats.slice(0, 5).map(cat => <span key={cat} style={legendItem(palette)}><span style={{ width: 8, height: 8, borderRadius: 2, background: monthlyThreatData.catColors[cat] }} />{cat.length > 14 ? cat.slice(0, 14) + '…' : cat}</span>)}</div>
-                </div>
-              </div>
+              )}
             </div>
 
-            {/* ═══════════════════════════════════════════════════════════════════════════════ */}
-            {/* SECTION C: Mitigation & Action Performance                                     */}
-            {/* Layout: full-width target vs actual bar + 2-col (owner list | pipeline funnel) */}
-            {/* ═══════════════════════════════════════════════════════════════════════════════ */}
-            <h2 style={{ fontSize: 18, fontWeight: 900, color: palette.text, fontFamily: 'DM Sans, sans-serif', margin: '0 0 12px 0', letterSpacing: '-0.01em' }}>4. Mitigation Delivery Relationship</h2>
-
-            {/* 3-col row: Target vs Actual | Risk List by Owner | Mitigation Pipeline Stages */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: 12 }}>
-
-              {/* Col 1: Mitigation Plans Progress — Target vs Actual */}
+            <h2 style={analyticsGroupTitle(palette)}>4. Mitigation Performance Relationship</h2>
+            <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
               <div style={chartBox(palette)}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                  <h3 style={chartTitle(palette)}>Mitigation Plans Progress — Target vs Actual (All Weeks)</h3>
+                  <h3 style={chartTitle(palette)}>Mitigation Plans Progress — Target vs Actual</h3>
                   {weeklyTargetVsActualData.length > 0 && (() => {
                     const last = weeklyTargetVsActualData[weeklyTargetVsActualData.length - 1];
                     const isBelow = last.dev < 0;
@@ -1514,12 +1417,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                         <span style={{ fontSize: 16, fontFamily: 'DM Sans, sans-serif', fontWeight: 950, color: SE.blue }}>{last.avgTarget}%</span>
                         <span style={{ fontSize: 10, color: palette.muted, fontWeight: 700 }}>Target</span>
                         <span style={{ fontSize: 11, fontWeight: 900, color: isBelow ? SE.red : SE.green }}>{isBelow ? '▼' : '▲'} Dev {Math.abs(last.dev)}%</span>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: isBelow ? SE.red : SE.green }}>{isBelow ? 'Below target' : 'Above target'}</span>
                       </div>
                     );
                   })()}
                 </div>
-                <ResponsiveContainer width="100%" height={220}>
+                <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={weeklyTargetVsActualData} margin={{ top: 18, right: 16, left: 0, bottom: 4 }} barCategoryGap="30%" barGap={4}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
                     <XAxis dataKey="week" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
@@ -1539,242 +1441,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 </div>
               </div>
 
-              {/* Col 2: Risk List by Owner */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Risk List by Owner</h3>
-                <ResponsiveContainer width="100%" height={Math.max(220, ownerHighRiskData.length * 32)}>
-                  <BarChart data={ownerHighRiskData} layout="vertical" margin={{ top: 4, right: 44, left: 4, bottom: 4 }} barCategoryGap="20%" barGap={3}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-                    <XAxis type="number" tick={{ fontSize: 9, fill: palette.muted }} domain={[0, 100]} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis type="category" dataKey="owner" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} width={100} axisLine={false} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="count" name="Risk Count" fill={SE.blue} radius={[0, 4, 4, 0]} barSize={8} animationDuration={650}
-                      label={{ position: 'right', fontSize: 9, fontWeight: 700, fill: SE.blue, formatter: (v: number) => v }}
-                    />
-                    <Bar dataKey="avgPct" name="Avg Progress %" radius={[0, 4, 4, 0]} barSize={8} animationDuration={650}
-                      label={{ position: 'right', fontSize: 9, fontWeight: 700, fill: palette.muted, formatter: (v: number) => `${v}%` }}
-                    >
-                      {ownerHighRiskData.map((entry, index) => (
-                        <Cell key={index} fill={entry.avgPct >= 80 ? SE.green : entry.avgPct >= 50 ? SE.gold : SE.red} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={legendStyle}>{[[SE.blue,'Risk Count'],[SE.green,'≥80%'],[SE.gold,'50–79%'],[SE.red,'<50%']].map(([c,l])=><span key={l} style={legendItem(palette)}><span style={{width:10,height:6,background:c,borderRadius:2}}/>{l}</span>)}</div>
-              </div>
-
-              {/* Col 3: Mitigation Pipeline Stages */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Mitigation Pipeline Stages — {selectedWeek || period}</h3>
-                <MitigationFunnelChart data={funnelData} palette={palette} />
-              </div>
-
-            </div>
-
-
-
-
-
-
-          </SectionCard>
-
-
-          {/* SECTION A: Risks & Actions Overview (from PDF)                        */}
-          {/* ═══════════════════════════════════════════════════════════════════════ */}
-          <SectionCard id="risks-actions-section" title="2. Department Exposure & Action Relationship" palette={palette} open={sectionOpen['risks-actions-section'] ?? true} onOpenChange={open => setSingleSectionOpen('risks-actions-section', open)}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.4fr 1fr', gap: 12 }}>
-
-              {/* Chart A1: Risks per Department — Pie */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Risks per Department</h3>
-                <div style={{ position: 'relative', height: 200 }}>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie data={risksByDeptData} cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={2} dataKey="value" animationDuration={650} labelLine={false} minAngle={6}
-                        label={({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) => {
-                          if (!value) return null;
-                          const r = innerRadius + (outerRadius - innerRadius) * 0.55;
-                          const x = cx + r * Math.cos(-midAngle * Math.PI / 180);
-                          const y = cy + r * Math.sin(-midAngle * Math.PI / 180);
-                          return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 11, fontWeight: 900, fill: 'white' }}>{value}</text>;
-                        }}>
-                        {risksByDeptData.map((d, i) => <Cell key={i} fill={d.color} stroke={palette.cardSolid} strokeWidth={2} />)}
-                      </Pie>
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ color: SE.blue, fontSize: 26, fontFamily: 'DM Sans, sans-serif', fontWeight: 950 }}>{risksByDeptData.reduce((s, d) => s + d.value, 0)}</div>
-                      <div style={{ color: palette.muted, fontSize: 9, fontWeight: 800 }}>TOTAL</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={legendStyle}>{risksByDeptData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.name}</span>)}</div>
-              </div>
-
-              {/* Chart A2: Actions per Department — Pie */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Actions per Department</h3>
-                <div style={{ position: 'relative', height: 200 }}>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie data={actionsByDeptData} cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={2} dataKey="value" animationDuration={650} labelLine={false} minAngle={6}
-                        label={({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) => {
-                          if (!value) return null;
-                          const r = innerRadius + (outerRadius - innerRadius) * 0.55;
-                          const x = cx + r * Math.cos(-midAngle * Math.PI / 180);
-                          const y = cy + r * Math.sin(-midAngle * Math.PI / 180);
-                          return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 11, fontWeight: 900, fill: 'white' }}>{value}</text>;
-                        }}>
-                        {actionsByDeptData.map((d, i) => <Cell key={i} fill={d.color} stroke={palette.cardSolid} strokeWidth={2} />)}
-                      </Pie>
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ color: SE.teal, fontSize: 26, fontFamily: 'DM Sans, sans-serif', fontWeight: 950 }}>{actionsByDeptData.reduce((s, d) => s + d.value, 0)}</div>
-                      <div style={{ color: palette.muted, fontSize: 9, fontWeight: 800 }}>TOTAL</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={legendStyle}>{actionsByDeptData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.name}</span>)}</div>
-              </div>
-
-              {/* Chart A3: Action Status per Department — grouped bar */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Action Status per Department</h3>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={actionStatusByDeptData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }} barCategoryGap="20%" barGap={3}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="dept" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="completed" name="Completed" fill={SE.green} radius={[3, 3, 0, 0]} animationDuration={650} />
-                    <Bar dataKey="inProgress" name="In Progress" fill={SE.gold} radius={[3, 3, 0, 0]} animationDuration={650} />
-                    <Bar dataKey="overdue" name="Overdue" fill={SE.red} radius={[3, 3, 0, 0]} animationDuration={650} />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={legendStyle}>
-                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.green, borderRadius: 2 }} />Completed</span>
-                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.gold, borderRadius: 2 }} />In Progress</span>
-                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.red, borderRadius: 2 }} />Overdue</span>
-                </div>
-              </div>
-
-              {/* Chart A4: Overall Action Completion Donut */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Overall Progress Status</h3>
-                <div style={{ position: 'relative', height: 200 }}>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie data={overallActionDonutData} cx="50%" cy="50%" innerRadius={52} outerRadius={80} paddingAngle={3} dataKey="value" animationDuration={650} labelLine={false} minAngle={8}
-                        label={({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) => {
-                          if (!value) return null;
-                          const r = innerRadius + (outerRadius - innerRadius) * 0.55;
-                          const x = cx + r * Math.cos(-midAngle * Math.PI / 180);
-                          const y = cy + r * Math.sin(-midAngle * Math.PI / 180);
-                          return <text x={x} y={y} textAnchor="middle" dominantBaseline="central" style={{ fontSize: 11, fontWeight: 900, fill: 'white' }}>{value}</text>;
-                        }}>
-                        {overallActionDonutData.map((d, i) => <Cell key={i} fill={d.color} stroke={palette.cardSolid} strokeWidth={2} />)}
-                      </Pie>
-                      <Tooltip content={<ChartTooltip palette={palette} />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ color: SE.green, fontSize: 26, fontFamily: 'DM Sans, sans-serif', fontWeight: 950 }}>
-                        {overallActionDonutData.find(d => d.name === 'Completed')?.value ?? 0}
-                      </div>
-                      <div style={{ color: palette.muted, fontSize: 9, fontWeight: 800 }}>COMPLETED</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={legendStyle}>{overallActionDonutData.map(d => <span key={d.name} style={legendItem(palette)}><span style={{ width: 9, height: 9, borderRadius: 999, background: d.color }} />{d.name}</span>)}</div>
-              </div>
-
-            </div>
-          </SectionCard>
-
-          {/* ═══════════════════════════════════════════════════════════════════════ */}
-          {/* SECTION B: Department Risk Level (from PDF)                            */}
-          {/* ═══════════════════════════════════════════════════════════════════════ */}
-          <SectionCard id="dept-risk-level-section" title="2.1 Department Risk Level Relationship" palette={palette} open={sectionOpen['dept-risk-level-section'] ?? true} onOpenChange={open => setSingleSectionOpen('dept-risk-level-section', open)}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1.4fr', gap: 12 }}>
-
-              {/* Chart B1: Risk Priority per Department — stacked bar */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Risk Priority per Department</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={priorityByDeptData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }} barCategoryGap="25%">
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="dept" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="veryHigh" name="Very High" stackId="a" fill={ZONE_COLORS['Very High']} animationDuration={650} />
-                    <Bar dataKey="high" name="High" stackId="a" fill={ZONE_COLORS.High} animationDuration={650} />
-                    <Bar dataKey="moderate" name="Moderate" stackId="a" fill={ZONE_COLORS.Moderate} animationDuration={650} />
-                    <Bar dataKey="low" name="Low" stackId="a" fill={ZONE_COLORS.Low} animationDuration={650} />
-                    <Bar dataKey="veryLow" name="Very Low" stackId="a" fill={ZONE_COLORS['Very Low']} radius={[3, 3, 0, 0]} animationDuration={650} />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={legendStyle}>
-                  {(['Very High', 'High', 'Moderate', 'Low', 'Very Low'] as const).map(z => <span key={z} style={legendItem(palette)}><span style={{ width: 10, height: 7, background: ZONE_COLORS[z], borderRadius: 2 }} />{z}</span>)}
-                </div>
-              </div>
-
-              {/* Chart B2: Sector-wide Risk Level distribution */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Telecom Risk Level</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={sectorRiskLevelData} margin={{ top: 16, right: 24, left: 0, bottom: 4 }} barCategoryGap="30%">
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="name" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 9, fill: palette.muted }} allowDecimals={false} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="value" name="Count" radius={[4, 4, 0, 0]} animationDuration={650}
-                      label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: palette.text, formatter: (v: number) => v || '' }}>
-                      {sectorRiskLevelData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Chart B3: Inherent vs Residual vs Target per Department */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Department Risk Index — Inherent vs Residual vs Target</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={inherentResidualByDeptData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }} barCategoryGap="20%" barGap={3}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="dept" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 9, fill: palette.muted }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="inherent" name="Avg Inherent" fill={SE.red} radius={[3, 3, 0, 0]} animationDuration={650} />
-                    <Bar dataKey="residual" name="Avg Residual" fill={SE.orange} radius={[3, 3, 0, 0]} animationDuration={650} />
-                    <Bar dataKey="target" name="Avg Target" fill={SE.green} radius={[3, 3, 0, 0]} animationDuration={650} />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={legendStyle}>
-                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.red, borderRadius: 2 }} />Avg Inherent</span>
-                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.orange, borderRadius: 2 }} />Avg Residual</span>
-                  <span style={legendItem(palette)}><span style={{ width: 10, height: 7, background: SE.green, borderRadius: 2 }} />Avg Target</span>
-                </div>
-              </div>
-
-            </div>
-          </SectionCard>
-
-          {/* ═══════════════════════════════════════════════════════════════════════ */}
-          {/* SECTION C: Department Performance (from PDF)                           */}
-          {/* ═══════════════════════════════════════════════════════════════════════ */}
-          <SectionCard id="dept-performance-section" title="2.2 Department Control Performance Relationship" palette={palette} open={sectionOpen['dept-performance-section'] ?? true} onOpenChange={open => setSingleSectionOpen('dept-performance-section', open)}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 12 }}>
-
-              {/* Chart C1: Actual vs Target per Department */}
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>Actual vs Target — per Department</h3>
-                <ResponsiveContainer width="100%" height={240}>
+                <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={actualVsTargetByDeptData} margin={{ top: 18, right: 20, left: 0, bottom: 4 }} barCategoryGap="25%" barGap={4}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
                     <XAxis dataKey="dept" tick={{ fontSize: 9, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
@@ -1793,35 +1462,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.orange, borderRadius: 2 }} />Avg Actual %</span>
                 </div>
               </div>
-
-              {/* Chart C2: Telecom Overall Performance — Inherent vs Residual overall */}
-              <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Inherent vs Residual — Telecom Overall</h3>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={inherentResidualOverallData} margin={{ top: 18, right: 20, left: 0, bottom: 4 }} barCategoryGap="40%" barGap={6}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 9, fill: palette.muted }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                    <Tooltip content={<ChartTooltip palette={palette} />} />
-                    <Bar dataKey="inherent" name="Avg Inherent Index" fill={SE.red} radius={[4, 4, 0, 0]} animationDuration={650}
-                      label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: SE.red, formatter: (v: number) => v }}
-                    />
-                    <Bar dataKey="residual" name="Avg Residual Index" fill={SE.orange} radius={[4, 4, 0, 0]} animationDuration={650}
-                      label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: SE.orange, formatter: (v: number) => v }}
-                    />
-                    <Bar dataKey="target" name="Avg Target Index" fill={SE.green} radius={[4, 4, 0, 0]} animationDuration={650}
-                      label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: SE.green, formatter: (v: number) => v }}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={legendStyle}>
-                  <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.red, borderRadius: 2 }} />Avg Inherent</span>
-                  <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.orange, borderRadius: 2 }} />Avg Residual</span>
-                  <span style={legendItem(palette)}><span style={{ width: 12, height: 7, background: SE.green, borderRadius: 2 }} />Avg Target</span>
-                </div>
-              </div>
-
             </div>
+
           </SectionCard>
           </div>}
 
@@ -1888,14 +1530,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           {activeMainTab === 'register' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
           <SectionCard id="risk-register-section" title={`Risk Register — ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} open={sectionOpen['risk-register-section']} onOpenChange={open => setSingleSectionOpen('risk-register-section', open)} actions={<><SmallActionButton palette={palette} onClick={exportRisksToExcel}><FileSpreadsheet size={12} />Excel</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'Risk_Register.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
-            <div className="no-print" style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 900 }}><Filter size={13} />Filters</span>
-              <div style={{ position: 'relative' }}><Search size={13} style={{ position: 'absolute', left: 12, top: 10, color: palette.muted }} /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search title, mitigation, owner…" style={inputStyle} /></div>
-              <select value={filterRating} onChange={e => setFilterRating(e.target.value)} style={selectStyle}>{uniqueRatings.map(r => <option key={r} value={r}>{r === 'All' ? 'All Ratings' : r}</option>)}</select>
-              <select value={filterOwner} onChange={e => setFilterOwner(e.target.value)} style={selectStyle}>{uniqueOwners.map(o => <option key={o} value={o}>{o === 'All' ? 'All Owners' : o}</option>)}</select>
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={selectStyle}>{uniqueStatuses.map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}</select>
-              {hasFilters && <button onClick={resetFilters} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.border}`, borderRadius: 999, background: palette.cardSolid, color: palette.text, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}><RotateCcw size={12} />Clear</button>}
-              <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 800 }}>Showing {filteredRisks.length} of {riskRegister.length}</span>
+            <div className="no-print" style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 900 }}><Filter size={13} />Register uses the global filters above</span>
+              <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 800 }}>Showing page {safeRegisterPage} · {filteredRisks.length} of {riskRegister.length}</span>
             </div>
 
             <div style={{ background: isDark ? 'rgba(14,39,79,.72)' : '#EBF8FF', border: `1px solid ${palette.border}`, borderRadius: 14, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 18, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -1905,7 +1542,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: palette.muted, fontWeight: 900 }}><span style={pillCircle('#95A5A6')}>{changesSummary.noChange}</span>No Change</span>
             </div>
 
-            <div id="risk-table-wrapper" style={{ overflow: 'auto', maxHeight: 470, borderRadius: 14, border: `1px solid ${palette.border}`, marginBottom: activeRisk ? 14 : 0 }}>
+            <div id="risk-table-wrapper" style={{ overflow: 'hidden', borderRadius: 14, border: `1px solid ${palette.border}`, marginBottom: 0 }}>
               <table className="risk-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 11 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
                   <tr style={{ background: palette.tableHead, color: 'white' }}>
@@ -1913,7 +1550,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRisks.length === 0 ? <tr><td colSpan={10} style={{ padding: 28, textAlign: 'center', color: palette.muted, background: palette.cardSolid }}>No risks match the selected filters.</td></tr> : filteredRisks.map((row, i) => {
+                  {filteredRisks.length === 0 ? <tr><td colSpan={10} style={{ padding: 28, textAlign: 'center', color: palette.muted, background: palette.cardSolid }}>No risks match the selected filters.</td></tr> : pagedRegisterRisks.map((row, i) => {
                     const isActive = activeRisk?.id === row.id;
                     const isHighScore = row.score >= 20;
                     const rowBg = isActive ? 'linear-gradient(135deg, #073266, #0078FF)' : isHighScore ? 'linear-gradient(135deg, rgba(192,57,43,.95), rgba(123,36,28,.95))' : i % 2 === 0 ? palette.tableStripe : palette.cardSolid;
@@ -1936,6 +1573,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 </tbody>
               </table>
             </div>
+            <PaginationControls page={safeRegisterPage} totalItems={filteredRisks.length} onPageChange={setRegisterPage} palette={palette} label="risks" />
 
             {/* ── Selected Risk Detail (inline, below the table) ─────── */}
             {activeRisk && (
@@ -1997,9 +1635,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               {(['all', 'high', 'overdue', 'search'] as const).map(tab => {
                 const labels: Record<string, string> = { all: 'All Risks', high: 'High Priority', overdue: 'Overdue Actions', search: 'Search Result' };
                 const counts: Record<string, number> = {
-                  all: riskRegister.length,
-                  high: riskRegister.filter(r => r.score >= 15 || /high/i.test(r.rating)).length,
-                  overdue: riskRegister.filter(r => r.isOverdue).length,
+                  all: filteredRisks.length,
+                  high: filteredRisks.filter(r => r.score >= 15 || /high/i.test(r.rating)).length,
+                  overdue: filteredRisks.filter(r => riskIsOverdue(r)).length,
                   search: riskLogFiltered.length,
                 };
                 const isActive = riskLogTab === tab;
@@ -2193,11 +1831,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.border}`, borderRadius: 999, background: palette.cardSolid, color: palette.text, height: 28, padding: '0 10px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}
                 ><RotateCcw size={12} />Clear</button>
               )}
-              <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 800 }}>Showing {residualFilteredRisks.length} of {riskRegister.filter(r => r.residualScore > 0).length}</span>
+              <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 800 }}>Showing page {safeResidualPage} · {residualFilteredRisks.length} of {filteredRisks.filter(r => r.residualScore > 0).length}</span>
             </div>
 
             {/* ── Risk table ─────────────────────────────────────────── */}
-            <div style={{ overflow: 'auto', maxHeight: 460, borderRadius: 14, border: `1px solid ${palette.border}`, marginBottom: 14 }}>
+            <div style={{ overflow: 'hidden', borderRadius: 14, border: `1px solid ${palette.border}`, marginBottom: 0 }}>
               <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 11 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                   <tr style={{ background: palette.tableHead, color: 'white' }}>
@@ -2207,7 +1845,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   </tr>
                 </thead>
                 <tbody>
-                  {residualFilteredRisks.map((risk, idx) => {
+                  {pagedResidualRisks.map((risk, idx) => {
+                    const rowNo = residualStartIndex + idx + 1;
                     const isEven = idx % 2 === 0;
                     const ratingColor = getRatingColor(risk.rating);
                     const statusDot = risk.progressStatus.includes('Completed') ? SE.green : risk.progressStatus.includes('Not Started') ? palette.muted : SE.blue;
@@ -2220,7 +1859,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                         onMouseLeave={e => (e.currentTarget as HTMLTableRowElement).style.background = isEven ? palette.tableStripe : palette.cardSolid}
                       >
                         {/* # */}
-                        <td style={{ ...tableTd(palette.muted, palette), textAlign: 'center', width: 32, fontWeight: 900 }}>{idx + 1}</td>
+                        <td style={{ ...tableTd(palette.muted, palette), textAlign: 'center', width: 32, fontWeight: 900 }}>{rowNo}</td>
                         {/* Risk title + subtitle */}
                         <td style={{ ...tableTd(palette.text, palette), maxWidth: 280, minWidth: 160 }}>
                           <div style={{ fontWeight: 900, fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 270 }} title={risk.title}>{risk.title}</div>
@@ -2272,6 +1911,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 </tbody>
               </table>
             </div>
+            <PaginationControls page={safeResidualPage} totalItems={residualFilteredRisks.length} onPageChange={setResidualPage} palette={palette} label="residual risks" />
 
             {/* ── Top Risks by Residual Score chart ─────────────────── */}
             {topResidualRisks.length > 0 && (
@@ -2415,14 +2055,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="velocity-section" title="Risk Score Velocity — Inherent vs Residual vs Target" palette={palette} bodyRef={velocityRef} open={sectionOpen['velocity-section']} onOpenChange={open => setSingleSectionOpen('velocity-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(velocityRef, 'Risk_Velocity.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div ref={velocityRef}>
               <RiskVelocityChart data={{
-                items: [...riskRegister]
-                  .filter(r => r.score > 0)
-                  .sort((a, b) => b.score - a.score)
-                  .map(r => ({ title: r.title, inherent: r.score, residual: r.residualScore ?? 0, target: r.tScore ?? 0, gap: (r.residualScore ?? 0) - (r.tScore ?? 0), rating: r.rating })),
-                avgInherent: riskRegister.length > 0 ? Math.round(riskRegister.filter(r=>r.score>0).reduce((a,b)=>a+b.score,0)/(riskRegister.filter(r=>r.score>0).length||1)*10)/10 : 0,
-                avgResidual: riskRegister.length > 0 ? Math.round(riskRegister.filter(r=>r.score>0).reduce((a,b)=>a+(b.residualScore??0),0)/(riskRegister.filter(r=>r.score>0).length||1)*10)/10 : 0,
-                avgTarget:   riskRegister.length > 0 ? Math.round(riskRegister.filter(r=>(r.tScore??0)>0).reduce((a,b)=>a+(b.tScore??0),0)/(riskRegister.filter(r=>(r.tScore??0)>0).length||1)*10)/10 : 0,
+                items: pagedVelocityItems,
+                avgInherent: velocitySummary.avgInherent,
+                avgResidual: velocitySummary.avgResidual,
+                avgTarget: velocitySummary.avgTarget,
               }} palette={palette} />
+              <PaginationControls page={safeVelocityPage} totalItems={velocityItems.length} onPageChange={setVelocityPage} palette={palette} label="velocity risks" />
             </div>
           </SectionCard>
 
@@ -2431,7 +2069,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             <div ref={taxonomyRef}>
               <RiskTaxonomyChart data={(() => {
                 const catMap = new Map<string, Map<string, number>>();
-                riskRegister.forEach(r => {
+                filteredRisks.forEach(r => {
                   const cat = (r as any).category || 'Uncategorised';
                   const sub = (r as any).subCategory || 'Other';
                   if (!catMap.has(cat)) catMap.set(cat, new Map());
@@ -2442,78 +2080,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   .map(([name, sm]) => ({ name, count: Array.from(sm.values()).reduce((a,b)=>a+b,0), subCategories: Array.from(sm.entries()).map(([sn,sc])=>({name:sn,count:sc})) }))
                   .sort((a,b)=>b.count-a.count);
                 const rtMap = new Map<string, number>();
-                riskRegister.forEach(r => { const t=(r as any).riskType||'Unknown'; rtMap.set(t,(rtMap.get(t)??0)+1); });
+                filteredRisks.forEach(r => { const t=(r as any).riskType||'Unknown'; rtMap.set(t,(rtMap.get(t)??0)+1); });
                 const riskTypes = Array.from(rtMap.entries()).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
                 return { categories, riskTypes };
               })()} palette={palette} />
             </div>
           </SectionCard>
-          </div>}
-
-          {activeMainTab === 'analytics' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-          {/* ═══ Step 9: Sparkline Progression Row ═══ */}
-          {sparklineRisks.length > 0 && weeks.length > 1 && (
-          <SectionCard id="sparkline-section" title="5. Risk Change Progression Relationship" palette={palette} compact open={sectionOpen['sparkline-section'] ?? true} onOpenChange={open => setSingleSectionOpen('sparkline-section', open)}>
-
-            {/* Sparkline table */}
-            <div style={{ border: `1px solid ${palette.border}`, borderRadius: 12, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                <thead>
-                  <tr style={{ background: palette.tableHead, color: 'white' }}>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Risk Title</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Rating</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Score</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 10 }}>Current %</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 900, fontSize: 10 }}>Progression Trend</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sparklineRisks.map((r, i) => {
-                    const rc = getRatingColor(r.rating);
-                    const maxV = Math.max(100, ...r.sparkData.map(d => d.v));
-                    const sparkW = 160;
-                    const sparkH = 32;
-                    const pts = r.sparkData.map((d, j) => {
-                      const x = sparkW * (j / Math.max(1, r.sparkData.length - 1));
-                      const y = sparkH - (d.v / maxV) * (sparkH - 4) - 2;
-                      return `${x},${y}`;
-                    }).join(' ');
-                    const lastV = r.sparkData[r.sparkData.length - 1]?.v ?? 0;
-                    const firstV = r.sparkData[0]?.v ?? 0;
-                    const trend = lastV > firstV ? SE.green : lastV < firstV ? SE.red : palette.muted;
-                    return (
-                      <tr key={r.id} style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid }}>
-                        <td style={{ padding: '8px 12px', color: palette.text, fontWeight: 700, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                          <span style={{ background: `${rc}22`, color: rc, border: `1px solid ${rc}55`, borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 900 }}>{r.rating}</span>
-                        </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, color: getScoreColor(r.score) }}>{r.score}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 900, color: r.currentPct >= 100 ? SE.green : r.currentPct >= 50 ? SE.gold : SE.red }}>{r.currentPct}%</td>
-                        <td style={{ padding: '8px 10px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <svg width={sparkW} height={sparkH} viewBox={`0 0 ${sparkW} ${sparkH}`} style={{ overflow: 'visible' }}>
-                              <polyline points={pts} fill="none" stroke={trend} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-                              {r.sparkData.map((d, j) => {
-                                const x = sparkW * (j / Math.max(1, r.sparkData.length - 1));
-                                const y = sparkH - (d.v / maxV) * (sparkH - 4) - 2;
-                                return <circle key={j} cx={x} cy={y} r={2.5} fill={trend} />;
-                              })}
-                            </svg>
-                            <span style={{ fontSize: 10, fontWeight: 900, color: trend, minWidth: 28 }}>
-                              {lastV > firstV ? '↑' : lastV < firstV ? '↓' : '→'} {Math.abs(lastV - firstV)}%
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </SectionCard>
-          )}
-
           </div>}
 
           <footer style={{ textAlign: 'center', fontSize: 10, color: palette.muted, padding: '3px 0 10px' }}>Risk Management Dashboard · {period} · Click any risk row to update selected risk detail</footer>
@@ -2615,6 +2187,18 @@ function MitigationFunnelChart({ data, palette }: { data: FunnelStage[]; palette
 
 function chartBox(palette: ThemePalette): CSSProperties {
   return { background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 16, padding: 12, minHeight: 0 };
+}
+
+
+function analyticsGroupTitle(palette: ThemePalette): CSSProperties {
+  return {
+    fontSize: 17,
+    fontWeight: 950,
+    color: palette.text,
+    fontFamily: 'DM Sans, Inter, sans-serif',
+    margin: '4px 0 10px',
+    letterSpacing: '-0.01em',
+  };
 }
 
 function chartTitle(palette: ThemePalette): CSSProperties {
