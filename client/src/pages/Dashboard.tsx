@@ -203,24 +203,91 @@ function ChartTooltip({ active, payload, label, palette }: { active?: boolean; p
   );
 }
 
+function parseQuarterPeriod(value: string): { year: number; quarter: number; index: number; endMs: number } | null {
+  if (!value) return null;
+  const text = String(value).trim();
+  // Supports: 2025 Q1, 2025-Q1, 2025/Q1, Q1 2025, Q1-2025, q2/2026
+  const match =
+    text.match(/(?:^|\b)(\d{4})\s*[\-\/\s]*[Qq]([1-4])(?:\b|$)/) ||
+    text.match(/(?:^|\b)[Qq]([1-4])\s*[\-\/\s]*(\d{4})(?:\b|$)/);
+  if (!match) return null;
+  const first = match[1];
+  const second = match[2];
+  const year = first.length === 4 ? Number(first) : Number(second);
+  const quarter = first.length === 4 ? Number(second) : Number(first);
+  const quarterEnd: [number, number][] = [
+    [2, 31],   // Q1 → March 31
+    [5, 30],   // Q2 → June 30
+    [8, 30],   // Q3 → September 30
+    [11, 31],  // Q4 → December 31
+  ];
+  const [month, day] = quarterEnd[quarter - 1];
+  return { year, quarter, index: year * 4 + quarter, endMs: new Date(year, month, day).getTime() };
+}
+
+function canonicalQuarterLabel(value: string): string {
+  const period = parseQuarterPeriod(value);
+  return period ? `Q${period.quarter} ${period.year}` : String(value || '').trim();
+}
+
+function sortQuarterLabels(values: string[]): string[] {
+  return [...values].sort((a, b) => {
+    const qa = parseQuarterPeriod(a);
+    const qb = parseQuarterPeriod(b);
+    if (qa && qb) return qa.index - qb.index;
+    if (qa) return -1;
+    if (qb) return 1;
+    return a.localeCompare(b);
+  });
+}
+
+function latestSelectedQuarterLabel(selected: string[], orderedOptions: string[]): string {
+  const selectedSet = new Set(selected.map(canonicalQuarterLabel));
+  const ordered = orderedOptions.filter(label => selectedSet.has(canonicalQuarterLabel(label)));
+  return ordered[ordered.length - 1] || selected[selected.length - 1] || orderedOptions[orderedOptions.length - 1] || '';
+}
+
+function quarterEndProgressMonthLabel(periodLabel: string, orderedWeeks: { label: string }[]): string {
+  const period = parseQuarterPeriod(periodLabel);
+  if (!period) return orderedWeeks[orderedWeeks.length - 1]?.label || '';
+  const quarterStartMonth = (period.quarter - 1) * 3;
+  const quarterEndMonth = quarterStartMonth + 2;
+  const candidates = orderedWeeks.filter(w => {
+    const ms = getDateValue(w.label);
+    if (ms === null) return false;
+    const d = new Date(ms);
+    return d.getFullYear() === period.year && d.getMonth() >= quarterStartMonth && d.getMonth() <= quarterEndMonth;
+  });
+  if (candidates.length) return candidates[candidates.length - 1].label;
+  const before = orderedWeeks.filter(w => {
+    const ms = getDateValue(w.label);
+    return ms !== null && ms <= period.endMs;
+  });
+  return before[before.length - 1]?.label || orderedWeeks[orderedWeeks.length - 1]?.label || '';
+}
+
+function quarterTrendMonthLabels(periodLabels: string[], orderedWeeks: { label: string }[]): string[] {
+  if (!periodLabels.length) return orderedWeeks.map(w => w.label);
+  const periods = periodLabels.map(label => parseQuarterPeriod(label)).filter((p): p is NonNullable<ReturnType<typeof parseQuarterPeriod>> => Boolean(p));
+  if (!periods.length) return orderedWeeks.map(w => w.label);
+  return orderedWeeks
+    .filter(w => {
+      const ms = getDateValue(w.label);
+      if (ms === null) return false;
+      const d = new Date(ms);
+      const q = Math.floor(d.getMonth() / 3) + 1;
+      return periods.some(p => p.year === d.getFullYear() && p.quarter === q);
+    })
+    .map(w => w.label);
+}
+
 function getDateValue(value: string): number | null {
   if (!value) return null;
 
-  // 1. Quarter strings: Q1 2026, q2-2025, Q3/2024, etc.
+  // 1. Quarter strings: 2025 Q1, Q1 2025, 2025-Q2, q3/2026, etc.
   //    Q1 → Mar 31 | Q2 → Jun 30 | Q3 → Sep 30 | Q4 → Dec 31
-  const quarterMatch = value.match(/[Qq]([1-4])[\s\-\/]*(\d{4})/);
-  if (quarterMatch) {
-    const q = Number(quarterMatch[1]);
-    const yr = Number(quarterMatch[2]);
-    const quarterEnd: [number, number][] = [
-      [2, 31],   // Q1 → March 31
-      [5, 30],   // Q2 → June 30
-      [8, 30],   // Q3 → September 30
-      [11, 31],  // Q4 → December 31
-    ];
-    const [month, day] = quarterEnd[q - 1];
-    return new Date(yr, month, day).getTime();
-  }
+  const quarterPeriod = parseQuarterPeriod(value);
+  if (quarterPeriod) return quarterPeriod.endMs;
 
   // 2. Standard ISO / browser-parseable strings (e.g. "2026-06-01", "June 2026", "01 Jan 2026")
   const parsed = Date.parse(value);
@@ -264,10 +331,133 @@ function normalise(text: string) {
 const PAGE_SIZE = 10;
 
 function riskIsOverdue(risk: RiskRow): boolean {
-  if (risk.isOverdue) return true;
+  const scoped = risk as RiskRow & { __monthScoped?: boolean };
+  if (scoped.__monthScoped) return Boolean(risk.isOverdue);
   if ((risk.currentPct || 0) >= 100) return false;
   const due = getDateValue(risk.closingDate || '');
   return due !== null && due < Date.now();
+}
+
+
+
+function progressStatusFromPct(value: number): string {
+  if (value >= 100) return 'Completed (100%)';
+  if (value > 0) return 'In Progress (1-99%)';
+  return 'Not Started (0%)';
+}
+
+function summarizeMonthLabels(labels: string[], totalCount: number): string {
+  if (!labels.length || labels.length === totalCount) return 'All Months';
+  if (labels.length === 1) return labels[0];
+  return `${labels.length} Months`;
+}
+
+function latestSelectedMonthLabel(monthLabels: string[], orderedWeeks: { label: string }[]): string {
+  const selected = new Set(monthLabels);
+  const ordered = orderedWeeks.map(w => w.label).filter(label => selected.has(label));
+  return ordered[ordered.length - 1] || monthLabels[monthLabels.length - 1] || orderedWeeks[orderedWeeks.length - 1]?.label || '';
+}
+
+function riskIsIdentifiedByMonth(risk: RiskRow, snapshotLabel: string, firstReportMonthLabel?: string, requireIdentificationDate = false): boolean {
+  // Identification Date is quarter-based in the source file (example: "2025 Q1").
+  // The selected Identification Date filter also uses quarter labels, so the
+  // snapshot cutoff must parse quarters first. If the label is a month, it falls
+  // back to that month's quarter.
+  const identifiedText = (risk.identificationDate || '').trim();
+  if (!identifiedText) return !requireIdentificationDate;
+
+  const identifiedQuarter = parseQuarterPeriod(identifiedText);
+  const snapshotQuarter = parseQuarterPeriod(snapshotLabel);
+  const snapshotMs = getDateValue(snapshotLabel);
+  const firstReportMs = firstReportMonthLabel ? getDateValue(firstReportMonthLabel) : null;
+
+  let snapshotQuarterIndex: number | null = null;
+  if (snapshotQuarter) {
+    snapshotQuarterIndex = snapshotQuarter.index;
+  } else if (snapshotMs !== null) {
+    const snapshotDate = new Date(snapshotMs);
+    snapshotQuarterIndex = snapshotDate.getFullYear() * 4 + (Math.floor(snapshotDate.getMonth() / 3) + 1);
+  }
+
+  let firstQuarterIndex: number | null = null;
+  if (firstReportMs !== null) {
+    const firstDate = new Date(firstReportMs);
+    firstQuarterIndex = firstDate.getFullYear() * 4 + (Math.floor(firstDate.getMonth() / 3) + 1);
+  }
+
+  if (identifiedQuarter) {
+    if (snapshotQuarterIndex === null) return true;
+    return identifiedQuarter.index <= snapshotQuarterIndex &&
+      (firstQuarterIndex === null || identifiedQuarter.index >= firstQuarterIndex);
+  }
+
+  // Normal date fallback for files that use day/month/year or month/year.
+  const cutoff = snapshotQuarter?.endMs ?? snapshotMs;
+  const identified = getDateValue(identifiedText);
+  if (cutoff === null) return true;
+  if (identified === null) return false;
+  return identified <= cutoff && (firstReportMs === null || identified >= firstReportMs);
+}
+
+function monthScopedRisk(risk: RiskRow, monthLabels: string[], orderedWeeks: { label: string }[]): RiskRow {
+  const labels = monthLabels.length ? monthLabels : orderedWeeks.map(w => w.label);
+  const snapshotLabel = latestSelectedMonthLabel(labels, orderedWeeks);
+  const snapshotVal = snapshotLabel ? (risk.weekProgress[snapshotLabel] ?? 0) : (risk.currentPct || 0) / 100;
+  const snapshotMs = getDateValue(snapshotLabel) ?? Date.now();
+  const currentPct = Math.round(snapshotVal > 1 ? snapshotVal : snapshotVal * 100);
+  const snapshotIndex = orderedWeeks.findIndex(w => w.label === snapshotLabel);
+  const prevLabel = snapshotIndex > 0 ? orderedWeeks[snapshotIndex - 1]?.label : snapshotLabel;
+  const prevVal = prevLabel ? (risk.weekProgress[prevLabel] ?? snapshotVal) : snapshotVal;
+  const beforePct = Math.round(prevVal > 1 ? prevVal : prevVal * 100);
+  return {
+    ...risk,
+    currentPct,
+    beforePct,
+    developmentPct: currentPct - beforePct,
+    progressStatus: progressStatusFromPct(currentPct),
+    aboveTarget: currentPct >= 100,
+    belowTarget: currentPct < 100,
+    isOverdue: currentPct < 100 && (() => {
+      const due = getDateValue(risk.closingDate || '');
+      return due !== null && due < snapshotMs;
+    })(),
+    __monthScoped: true,
+    __snapshotMs: snapshotMs,
+  } as RiskRow;
+}
+
+function riskSeverityRank(risk: RiskRow): number {
+  const rating = (risk.rating || '').toLowerCase();
+  if (rating.includes('very high') || risk.score >= 20) return 5;
+  if (rating.includes('high') || risk.score >= 15) return 4;
+  if (rating.includes('moderate') || risk.score >= 9) return 3;
+  if (rating.includes('low') || risk.score >= 5) return 2;
+  return 1;
+}
+
+function riskRatingLabelFromScore(score: number): string {
+  if (score >= 20) return 'Very High';
+  if (score >= 15) return 'High';
+  if (score >= 9) return 'Moderate';
+  if (score >= 5) return 'Low';
+  return 'Very Low';
+}
+
+function getOverdueDays(risk: RiskRow): number {
+  if (!riskIsOverdue(risk)) return 0;
+  const due = getDateValue(risk.closingDate || '');
+  const asOf = (risk as RiskRow & { __snapshotMs?: number }).__snapshotMs ?? Date.now();
+  if (due === null) return 0;
+  return Math.max(1, Math.floor((asOf - due) / 86400000));
+}
+
+function getOverdueBucket(risk: RiskRow): string {
+  const days = getOverdueDays(risk);
+  if (!days) return 'On Track';
+  if (days > 90) return 'Overdue >90 Days';
+  if (days > 60) return 'Overdue 61–90 Days';
+  if (days > 30) return 'Overdue 31–60 Days';
+  return 'Overdue 1–30 Days';
 }
 
 function sortDateLabels(values: string[]): string[] {
@@ -378,48 +568,163 @@ function SmallActionButton({ children, onClick, title, palette, disabled = false
   );
 }
 
+
+function optionList(values: string[]): string[] {
+  return values.filter(value => value && value !== 'All');
+}
+
+function matchesMultiFilter(value: string, selected: string[]): boolean {
+  if (!selected.length) return true;
+  return selected.includes(value);
+}
+
+function isMultiFilterActive(selected: string[], options: string[]): boolean {
+  const cleanOptions = optionList(options);
+  if (!selected.length) return false;
+  if (cleanOptions.length && selected.length >= cleanOptions.length && cleanOptions.every(option => selected.includes(option))) return false;
+  return true;
+}
+
+function MultiSelectFilter({
+  label,
+  allLabel,
+  options,
+  selected,
+  onChange,
+  palette,
+  minWidth = 150,
+}: {
+  label: string;
+  allLabel: string;
+  options: string[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+  palette: ThemePalette;
+  minWidth?: number;
+}) {
+  const cleanOptions = optionList(options);
+  const filterIdRef = useRef(`filter-${label}-${Math.random().toString(36).slice(2)}`);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const allSelected = cleanOptions.length > 0 && selected.length >= cleanOptions.length && cleanOptions.every(option => selected.includes(option));
+  const active = selected.length > 0 && !allSelected;
+  const summary = !active
+    ? allLabel
+    : selected.length === 1
+      ? selected[0]
+      : `${selected.length} ${label}`;
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onFilterOpened = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (detail !== filterIdRef.current) setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    window.addEventListener('dashboard-filter-opened', onFilterOpened as EventListener);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      window.removeEventListener('dashboard-filter-opened', onFilterOpened as EventListener);
+    };
+  }, []);
+
+  const toggleOpen = () => {
+    setOpen(prev => {
+      const next = !prev;
+      if (next) window.dispatchEvent(new CustomEvent('dashboard-filter-opened', { detail: filterIdRef.current }));
+      return next;
+    });
+  };
+
+  const toggle = (value: string) => {
+    onChange(selected.includes(value) ? selected.filter(item => item !== value) : [...selected, value]);
+  };
+
+  return (
+    <div ref={rootRef} className="no-print filter-dropdown-root" style={{ position: 'relative', flexShrink: 0, zIndex: open ? 14000 : 9000 }}>
+      <button
+        type="button"
+        onClick={toggleOpen}
+        aria-expanded={open}
+        style={{ listStyle: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth, maxWidth: 220, height: 34, borderRadius: 999, border: `1px solid ${active ? SE.blue : palette.border}`, background: active ? 'rgba(0,120,255,.14)' : palette.cardSolid, color: active ? SE.blue : palette.text, padding: '0 12px', fontSize: 11, fontWeight: 900, fontFamily: 'DM Sans, Inter, sans-serif', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden' }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{summary}</span>
+        <ChevronDown size={13} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }} />
+      </button>
+      {open && (
+        <div className="filter-dropdown-menu" style={{ position: 'absolute', left: 0, top: 39, zIndex: 15000, width: 250, maxHeight: 330, overflowY: 'auto', padding: 10, borderRadius: 14, background: palette.cardSolid, border: `1px solid ${palette.border}`, boxShadow: palette.shadow }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 8 }}>
+            <button type="button" onClick={() => { onChange(cleanOptions); setOpen(false); }} style={{ flex: 1, border: `1px solid ${SE.blue}`, background: 'rgba(0,120,255,.13)', color: SE.blue, borderRadius: 999, height: 27, fontSize: 10, fontWeight: 900, cursor: 'pointer' }}>Select All</button>
+            <button type="button" onClick={() => { onChange([]); setOpen(false); }} style={{ flex: 1, border: `1px solid ${palette.border}`, background: palette.cardSoft, color: palette.text, borderRadius: 999, height: 27, fontSize: 10, fontWeight: 850, cursor: 'pointer' }}>Clear</button>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${!active ? SE.blue : palette.border}`, background: !active ? 'rgba(0,120,255,.12)' : palette.cardSoft, color: !active ? SE.blue : palette.text, borderRadius: 10, padding: '7px 8px', fontSize: 11, fontWeight: 900, cursor: 'pointer', marginBottom: 6 }}>
+            <input type="checkbox" checked={!active} onChange={() => { onChange(cleanOptions); setOpen(false); }} style={{ accentColor: SE.blue }} />
+            <span>{allLabel}</span>
+          </label>
+          <div style={{ display: 'grid', gap: 5 }}>
+            {cleanOptions.map(option => {
+              const checked = selected.includes(option) || allSelected;
+              return (
+                <label key={option} style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${checked && active ? SE.blue : palette.border}`, background: checked && active ? 'rgba(0,120,255,.13)' : palette.cardSoft, color: checked && active ? SE.blue : palette.text, borderRadius: 10, padding: '7px 8px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggle(option)} style={{ accentColor: SE.blue }} />
+                  <span>{option}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function KpiTile({ label, value, isText, color, selectedWeek, index, icon, sub, isPercent = false }: { label: string; value: number | string; isText?: boolean; color: string; selectedWeek: string; index: number; icon?: ReactNode; sub?: string; isPercent?: boolean }) {
   const numeric = Number(value);
   const ringPct = isText ? 78 : isPercent ? Math.max(20, Math.min(94, Number.isFinite(numeric) ? numeric : 55)) : Math.max(20, Math.min(94, Number.isFinite(numeric) ? numeric : 55));
   const displayValue = isText ? value : <><AnimatedNumber animationKey={`${selectedWeek}-${index}`} value={numeric} />{isPercent ? '%' : ''}</>;
   return (
-    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 252, padding: '6px 0' }}>
+    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 188, padding: '3px 0' }}>
       <div
         className="kpi-orb"
         style={{
           '--kpi-color': color,
           '--kpi-ring': `${ringPct}%`,
-          width: 'clamp(188px, 15vw, 218px)',
-          height: 'clamp(188px, 15vw, 218px)',
+          width: 'clamp(142px, 10.6vw, 168px)',
+          height: 'clamp(142px, 10.6vw, 168px)',
           borderRadius: '50%',
           position: 'relative',
           display: 'grid',
           placeItems: 'center',
           background: `conic-gradient(from 210deg, ${color} 0 var(--kpi-ring), rgba(255,255,255,.22) var(--kpi-ring) 100%)`,
-          boxShadow: `0 28px 60px rgba(0,0,0,.28), 0 0 38px ${color}38, inset 0 0 0 1px rgba(255,255,255,.26)`,
-          border: '1px solid rgba(255,255,255,.30)',
+          boxShadow: `0 18px 40px rgba(0,0,0,.24), 0 0 24px ${color}30, inset 0 0 0 1px rgba(255,255,255,.24)`,
+          border: '1px solid rgba(255,255,255,.28)',
         } as CSSProperties}
       >
-        <div style={{ position: 'absolute', inset: 11, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 5px 25px rgba(255,255,255,.20), inset 0 -24px 38px rgba(0,0,0,.28)' }} />
-        <div style={{ position: 'absolute', inset: 25, borderRadius: '50%', background: 'radial-gradient(circle at 35% 20%, rgba(255,255,255,.28), rgba(255,255,255,.08) 38%, rgba(0,0,0,.18) 100%)', border: '1px solid rgba(255,255,255,.20)' }} />
+        <div style={{ position: 'absolute', inset: 8, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 4px 18px rgba(255,255,255,.18), inset 0 -18px 28px rgba(0,0,0,.26)' }} />
+        <div style={{ position: 'absolute', inset: 20, borderRadius: '50%', background: 'radial-gradient(circle at 35% 20%, rgba(255,255,255,.28), rgba(255,255,255,.08) 38%, rgba(0,0,0,.18) 100%)', border: '1px solid rgba(255,255,255,.18)' }} />
         {icon && (
-          <div className="kpi-icon" style={{ position: 'absolute', top: 24, width: 44, height: 44, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,.19)', border: '1px solid rgba(255,255,255,.30)', color: '#fff', boxShadow: '0 9px 20px rgba(0,0,0,.20)' }}>
+          <div className="kpi-icon" style={{ position: 'absolute', top: 16, width: 34, height: 34, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,.18)', border: '1px solid rgba(255,255,255,.28)', color: '#fff', boxShadow: '0 7px 16px rgba(0,0,0,.18)' }}>
             {icon}
           </div>
         )}
-        <div style={{ position: 'relative', width: '74%', height: '74%', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '52px 14px 14px' }}>
-          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 23 : 44, lineHeight: .96, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.055em', maxWidth: 142, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
+        <div style={{ position: 'relative', width: '76%', height: '76%', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '42px 9px 10px' }}>
+          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 18 : 32, lineHeight: .96, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.045em', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
             {displayValue}
           </div>
-          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.96)', fontSize: 11, fontWeight: 950, marginTop: 10, textTransform: 'uppercase', letterSpacing: '.052em', lineHeight: 1.15 }}>{label}</div>
-          {sub && <div className="kpi-sub" style={{ color: 'rgba(255,255,255,.74)', fontSize: 9.2, fontWeight: 850, marginTop: 7, lineHeight: 1.2, maxWidth: 132, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
+          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.96)', fontSize: 8.6, fontWeight: 950, marginTop: 7, textTransform: 'uppercase', letterSpacing: '.035em', lineHeight: 1.08, maxWidth: 116 }}>{label}</div>
+          {sub && <div className="kpi-sub" style={{ color: 'rgba(255,255,255,.74)', fontSize: 7.5, fontWeight: 850, marginTop: 5, lineHeight: 1.1, maxWidth: 112, whiteSpace: 'normal', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{sub}</div>}
         </div>
       </div>
     </div>
   );
 }
 
-function RiskHeatmap({ risks, filterOwner, palette }: { risks: RiskRow[]; filterOwner: string; palette: ThemePalette }) {
+function RiskHeatmap({ risks, filterOwner, palette }: { risks: RiskRow[]; filterOwner: string[]; palette: ThemePalette }) {
   const cellMap = useMemo(() => {
     const map: Record<string, RiskRow[]> = {};
     risks.forEach(r => {
@@ -444,7 +749,7 @@ function RiskHeatmap({ risks, filterOwner, palette }: { risks: RiskRow[]; filter
 
   return (
     <div style={{ padding: 2 }}>
-      {filterOwner !== 'All' && <div style={{ color: SE.gold, fontWeight: 900, fontSize: 10, textAlign: 'center', marginBottom: 6 }}>Highlighting owner: {filterOwner}</div>}
+      {filterOwner.length > 0 && <div style={{ color: SE.gold, fontWeight: 900, fontSize: 10, textAlign: 'center', marginBottom: 6 }}>Highlighting owner: {filterOwner.length === 1 ? filterOwner[0] : `${filterOwner.length} owners`}</div>}
       <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
         <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', textAlign: 'center', color: palette.muted, fontSize: 9, letterSpacing: 1, fontWeight: 900 }}>LIKELIHOOD</div>
         <div style={{ flex: 1 }}>
@@ -453,11 +758,11 @@ function RiskHeatmap({ risks, filterOwner, palette }: { risks: RiskRow[]; filter
               <div style={{ color: palette.muted, fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{l}</div>
               {[1, 2, 3, 4, 5].map(im => {
                 const items = cellMap[`${l}-${im}`] || [];
-                const highlight = filterOwner === 'All' ? items : items.filter(r => r.owner === filterOwner);
-                const dimmed = filterOwner !== 'All' && items.length > 0 && highlight.length === 0;
+                const highlight = filterOwner.length === 0 ? items : items.filter(r => filterOwner.includes(r.owner));
+                const dimmed = filterOwner.length > 0 && items.length > 0 && highlight.length === 0;
                 return (
-                  <div key={im} title={items.map(r => r.title).join('\n')} style={{ minHeight: 44, borderRadius: 8, background: cellColor(l, im), opacity: items.length ? (dimmed ? 0.28 : 0.96) : 0.18, border: highlight.length && filterOwner !== 'All' ? `2px solid ${SE.gold}` : `1px solid rgba(255,255,255,.42)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 950, boxShadow: highlight.length && filterOwner !== 'All' ? `0 0 0 3px rgba(201,168,76,.22)` : 'none' }}>
-                    {items.length > 0 && <><span style={{ fontSize: 15 }}>{filterOwner !== 'All' && highlight.length ? `${highlight.length}/${items.length}` : items.length}</span><span style={{ fontSize: 7, opacity: .86 }}>risks</span></>}
+                  <div key={im} title={items.map(r => r.title).join('\n')} style={{ minHeight: 44, borderRadius: 8, background: cellColor(l, im), opacity: items.length ? (dimmed ? 0.28 : 0.96) : 0.18, border: highlight.length && filterOwner.length > 0 ? `2px solid ${SE.gold}` : `1px solid rgba(255,255,255,.42)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 950, boxShadow: highlight.length && filterOwner.length > 0 ? `0 0 0 3px rgba(201,168,76,.22)` : 'none' }}>
+                    {items.length > 0 && <><span style={{ fontSize: 15 }}>{filterOwner.length > 0 && highlight.length ? `${highlight.length}/${items.length}` : items.length}</span><span style={{ fontSize: 7, opacity: .86 }}>risks</span></>}
                   </div>
                 );
               })}
@@ -530,7 +835,7 @@ interface Props {
 }
 
 export default function DashboardPage({ data, fileName, onReset, onWeekChange }: Props) {
-  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel, residualData, overdueActions, kriData, taxonomyData, velocityData } = data;
+  const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel, residualData, overdueActions, kriData, taxonomyData, velocityData, filterOptions } = data;
 
   // Normalize target KPI math at the display layer as a safety guard.
   // Total Risks is the risk-category total from Excel Output, not Total Mitigation.
@@ -546,18 +851,23 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const [activeRisk, setActiveRisk] = useState(selectedRisk);
   const [activeMainTab, setActiveMainTab] = useState<'overview' | 'register' | 'analytics' | 'mitigation' | 'residual'>('overview');
   const [showTrend, setShowTrend] = useState(false);
-  const [filterRating, setFilterRating] = useState('All');
-  const [filterOwner, setFilterOwner] = useState('All');
-  const [filterStatus, setFilterStatus] = useState('All');
-  const [filterClosingDate, setFilterClosingDate] = useState('All');
-  const [filterTarget, setFilterTarget] = useState('All');
-  const [filterTrackStatus, setFilterTrackStatus] = useState('All');
-  const [filterCategory, setFilterCategory] = useState('All');
-  const [filterRiskType, setFilterRiskType] = useState('All');
+  const [filterRating, setFilterRating] = useState<string[]>([]);
+  const [filterOwner, setFilterOwner] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<string[]>([]);
+  const [filterClosingDate, setFilterClosingDate] = useState<string[]>([]);
+  const [filterTarget, setFilterTarget] = useState<string[]>([]);
+  const [filterTrackStatus, setFilterTrackStatus] = useState<string[]>([]);
+  const [filterCategory, setFilterCategory] = useState<string[]>([]);
+  const [filterRiskType, setFilterRiskType] = useState<string[]>([]);
+  const [selectedIdentificationPeriods, setSelectedIdentificationPeriods] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [matrixFilter, setMatrixFilter] = useState<{ likelihood: number; impact: number } | null>(null);
   const [registerPage, setRegisterPage] = useState(1);
   const [residualPage, setResidualPage] = useState(1);
   const [velocityPage, setVelocityPage] = useState(1);
+  const [riskLogPage, setRiskLogPage] = useState(1);
+  const [overduePage, setOverduePage] = useState(1);
+  const [kriPage, setKriPage] = useState(1);
   const [residualFilterRating, setResidualFilterRating] = useState('All');
   const [residualFilterStatus, setResidualFilterStatus] = useState('All');
 
@@ -622,40 +932,94 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   useEffect(() => setActiveRisk(data.selectedRisk), [data.selectedRisk, data.selectedWeek]);
 
+  const allMonthLabels = useMemo(() => weeks.map(w => w.label), [weeks]);
+  const firstReportMonth = allMonthLabels[0] || '';
+  const hasIdentificationDates = useMemo(() => riskRegister.some(r => Boolean((r.identificationDate || '').trim())), [riskRegister]);
+  const identificationPeriodOptions = useMemo(() => {
+    const sourceValues = filterOptions?.identificationDates?.length
+      ? filterOptions.identificationDates
+      : riskRegister.map(r => r.identificationDate || '');
+    const values = sourceValues
+      .map(value => canonicalQuarterLabel(value || ''))
+      .map(value => value.trim())
+      .filter(Boolean);
+
+    // Identification Date options come from the actual source column values.
+    // For your file this should show Q1 2025, Q2 2025, Q3 2025, etc.
+    return sortQuarterLabels(Array.from(new Set(values)));
+  }, [riskRegister, filterOptions?.identificationDates]);
+  const safeSelectedIdentificationPeriods = useMemo(() => {
+    const validSet = new Set(identificationPeriodOptions.map(canonicalQuarterLabel));
+    return selectedIdentificationPeriods
+      .map(canonicalQuarterLabel)
+      .filter(label => validSet.has(label));
+  }, [selectedIdentificationPeriods, identificationPeriodOptions]);
+  const identificationFilterActive = useMemo(() => isMultiFilterActive(safeSelectedIdentificationPeriods, identificationPeriodOptions), [safeSelectedIdentificationPeriods, identificationPeriodOptions]);
+  const effectiveIdentificationPeriods = identificationFilterActive ? safeSelectedIdentificationPeriods : identificationPeriodOptions;
+  const selectedIdentificationSnapshotPeriod = useMemo(() => latestSelectedQuarterLabel(effectiveIdentificationPeriods, identificationPeriodOptions), [effectiveIdentificationPeriods, identificationPeriodOptions]);
+  const selectedSnapshotMonth = useMemo(() => {
+    if (identificationFilterActive && selectedIdentificationSnapshotPeriod) {
+      return quarterEndProgressMonthLabel(selectedIdentificationSnapshotPeriod, weeks);
+    }
+    return selectedWeek && allMonthLabels.includes(selectedWeek) ? selectedWeek : (allMonthLabels[allMonthLabels.length - 1] || '');
+  }, [identificationFilterActive, selectedIdentificationSnapshotPeriod, weeks, selectedWeek, allMonthLabels]);
+  const selectedMonthSummary = useMemo(() => {
+    if (!identificationFilterActive) return 'All Identification Dates';
+    if (safeSelectedIdentificationPeriods.length === 1) return safeSelectedIdentificationPeriods[0];
+    return `${safeSelectedIdentificationPeriods.length} Identification Periods`;
+  }, [identificationFilterActive, safeSelectedIdentificationPeriods]);
+  const snapshotRiskRegister = useMemo(() => {
+    if (!identificationFilterActive || !selectedIdentificationSnapshotPeriod) return riskRegister;
+    return riskRegister.filter(r => riskIsIdentifiedByMonth(r, selectedIdentificationSnapshotPeriod, firstReportMonth, hasIdentificationDates));
+  }, [riskRegister, identificationFilterActive, selectedIdentificationSnapshotPeriod, firstReportMonth, hasIdentificationDates]);
+  const monthScopedRiskRegister = useMemo(() => snapshotRiskRegister.map(r => monthScopedRisk(r, selectedSnapshotMonth ? [selectedSnapshotMonth] : [], weeks)), [snapshotRiskRegister, selectedSnapshotMonth, weeks]);
+
+  useEffect(() => {
+    if (!identificationPeriodOptions.length) return;
+    setSelectedIdentificationPeriods(prev => prev.map(canonicalQuarterLabel).filter(label => identificationPeriodOptions.includes(label)));
+  }, [identificationPeriodOptions]);
+
   const uniqueRatings = useMemo(() => {
-    const ratings: string[] = ['All', ...Array.from(new Set(riskRegister.map(r => r.rating).filter((value): value is string => Boolean(value))))];
-    const order = ['All', 'Very High', 'High', 'Moderate', 'Low', 'Very Low'];
-    return ratings.sort((a, b) => (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b)));
-  }, [riskRegister]);
+    const ratings = filterOptions?.ratings?.length
+      ? filterOptions.ratings
+      : Array.from(new Set(riskRegister.map(r => r.rating).filter((value): value is string => Boolean(value))));
+    const order = ['Very High', 'High', 'Moderate', 'Low', 'Very Low'];
+    return Array.from(new Set(ratings)).sort((a, b) => (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b)));
+  }, [riskRegister, filterOptions?.ratings]);
 
-  const uniqueOwners = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.owner).filter(Boolean))).sort()], [riskRegister]);
-  const uniqueStatuses = ['All', 'Completed (100%)', 'In Progress (1-99%)', 'Not Started (0%)'];
-  const uniqueClosingDates = useMemo(() => ['All', ...sortDateLabels(Array.from(new Set(riskRegister.map(r => r.closingDate).filter(Boolean))))], [riskRegister]);
-  const uniqueCategories = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.category || 'Uncategorised'))).sort()], [riskRegister]);
-  const uniqueRiskTypes = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.riskType || 'Unknown'))).sort()], [riskRegister]);
-  const targetOptions = ['All', 'Above Target', 'Below Target'];
-  const trackOptions = ['All', 'Overdue', 'In Track'];
+  const uniqueOwners = useMemo(() => (filterOptions?.owners?.length ? filterOptions.owners : Array.from(new Set(riskRegister.map(r => r.owner).filter(Boolean)))).sort(), [riskRegister, filterOptions?.owners]);
+  const uniqueStatuses = useMemo(() => (filterOptions?.progressStatuses?.length ? filterOptions.progressStatuses : Array.from(new Set(riskRegister.map(r => r.progressStatus).filter(Boolean)))).sort(), [riskRegister, filterOptions?.progressStatuses]);
+  const uniqueClosingDates = useMemo(() => sortDateLabels(filterOptions?.closingDates?.length ? filterOptions.closingDates : Array.from(new Set(riskRegister.map(r => r.closingDate).filter(Boolean)))), [riskRegister, filterOptions?.closingDates]);
+  const uniqueCategories = useMemo(() => (filterOptions?.categories?.length ? filterOptions.categories : Array.from(new Set(riskRegister.map(r => r.category || 'Uncategorised')))).sort(), [riskRegister, filterOptions?.categories]);
+  const uniqueRiskTypes = useMemo(() => (filterOptions?.riskTypes?.length ? filterOptions.riskTypes : Array.from(new Set(riskRegister.map(r => r.riskType || 'Unknown')))).sort(), [riskRegister, filterOptions?.riskTypes]);
+  const targetOptions = ['Above Target', 'Below Target'];
+  const trackOptions = ['Overdue', 'In Track'];
 
-  const filteredRisks = useMemo(() => {
+  const applyDashboardFilters = useCallback((r: RiskRow) => {
     const q = normalise(searchTerm);
-    return riskRegister.filter(r => {
-      const category = r.category || 'Uncategorised';
-      const riskType = r.riskType || 'Unknown';
-      const overdue = riskIsOverdue(r);
-      if (filterRating !== 'All' && r.rating !== filterRating) return false;
-      if (filterOwner !== 'All' && r.owner !== filterOwner) return false;
-      if (filterStatus !== 'All' && r.progressStatus !== filterStatus) return false;
-      if (filterClosingDate !== 'All' && r.closingDate !== filterClosingDate) return false;
-      if (filterTarget === 'Above Target' && !r.aboveTarget) return false;
-      if (filterTarget === 'Below Target' && !r.belowTarget) return false;
-      if (filterTrackStatus === 'Overdue' && !overdue) return false;
-      if (filterTrackStatus === 'In Track' && overdue) return false;
-      if (filterCategory !== 'All' && category !== filterCategory) return false;
-      if (filterRiskType !== 'All' && riskType !== filterRiskType) return false;
-      if (q && !normalise(`${r.title} ${r.mitigation} ${r.owner} ${r.rating} ${r.closingDate} ${category} ${riskType} ${r.progressStatus}`).includes(q)) return false;
-      return true;
-    });
-  }, [riskRegister, filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, searchTerm]);
+    const category = r.category || 'Uncategorised';
+    const riskType = r.riskType || 'Unknown';
+    const overdue = riskIsOverdue(r);
+    if (!matchesMultiFilter(r.rating || '', filterRating)) return false;
+    if (!matchesMultiFilter(r.owner || '', filterOwner)) return false;
+    if (!matchesMultiFilter(r.progressStatus || '', filterStatus)) return false;
+    if (!matchesMultiFilter(r.closingDate || '', filterClosingDate)) return false;
+    if (filterTarget.length) {
+      const targetStatus = r.aboveTarget ? 'Above Target' : 'Below Target';
+      if (!matchesMultiFilter(targetStatus, filterTarget)) return false;
+    }
+    if (filterTrackStatus.length) {
+      const trackStatus = overdue ? 'Overdue' : 'In Track';
+      if (!matchesMultiFilter(trackStatus, filterTrackStatus)) return false;
+    }
+    if (!matchesMultiFilter(category, filterCategory)) return false;
+    if (!matchesMultiFilter(riskType, filterRiskType)) return false;
+    if (matrixFilter && (Math.round(r.likelihood || 0) !== matrixFilter.likelihood || Math.round(r.impact || 0) !== matrixFilter.impact)) return false;
+    if (q && !normalise(`${r.title} ${r.mitigation} ${r.owner} ${r.rating} ${r.identificationDate || ''} ${r.closingDate} ${category} ${riskType} ${r.progressStatus}`).includes(q)) return false;
+    return true;
+  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm]);
+
+  const filteredRisks = useMemo(() => monthScopedRiskRegister.filter(applyDashboardFilters), [monthScopedRiskRegister, applyDashboardFilters]);
 
   const filteredZoneCounts = useMemo(() => ({
     veryHigh: filteredRisks.filter(r => r.score >= 20 || /very high/i.test(r.rating)).length,
@@ -667,18 +1031,21 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   const filteredMitigationActions = useMemo(() => {
     const count = filteredRisks.reduce((sum, r) => sum + (r.mitigation ? r.mitigation.split(/\n+/).filter(Boolean).length : 0), 0);
-    return count || (filteredRisks.length === riskRegister.length ? (Number(kpis.totalMitigation) || filteredRisks.length) : filteredRisks.length);
-  }, [filteredRisks, riskRegister.length, kpis.totalMitigation]);
+    return count || (filteredRisks.length === snapshotRiskRegister.length ? (Number(kpis.totalMitigation) || filteredRisks.length) : filteredRisks.length);
+  }, [filteredRisks, snapshotRiskRegister.length, kpis.totalMitigation]);
 
   const filteredOverallHealth = filteredRisks.length ? Math.round((filteredRisks.filter(r => r.aboveTarget).length / filteredRisks.length) * 100) : 0;
 
-  const hasFilters = filterRating !== 'All' || filterOwner !== 'All' || filterStatus !== 'All' || filterClosingDate !== 'All' || filterTarget !== 'All' || filterTrackStatus !== 'All' || filterCategory !== 'All' || filterRiskType !== 'All' || searchTerm.trim().length > 0;
+  const hasFilters = identificationFilterActive || isMultiFilterActive(filterRating, uniqueRatings) || isMultiFilterActive(filterOwner, uniqueOwners) || isMultiFilterActive(filterStatus, uniqueStatuses) || isMultiFilterActive(filterClosingDate, uniqueClosingDates) || isMultiFilterActive(filterTarget, targetOptions) || isMultiFilterActive(filterTrackStatus, trackOptions) || isMultiFilterActive(filterCategory, uniqueCategories) || isMultiFilterActive(filterRiskType, uniqueRiskTypes) || matrixFilter !== null || searchTerm.trim().length > 0;
 
   useEffect(() => {
     setRegisterPage(1);
     setResidualPage(1);
     setVelocityPage(1);
-  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, searchTerm, selectedWeek]);
+    setRiskLogPage(1);
+    setOverduePage(1);
+    setKriPage(1);
+  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm, selectedWeek, safeSelectedIdentificationPeriods]);
 
   useEffect(() => {
     if (!filteredRisks.length) {
@@ -718,31 +1085,104 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     return { overdue, completed, completedPct, highRiskOwner: topOwner, highRiskOwnerCount: topOwnerCount, highRiskTotal: highRisks.length };
   }, [filteredRisks]);
 
-  const weeklyMovementData = useMemo(() => weeks.map((w, index) => {
-    const values = filteredRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
-    const avgProgress = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+
+  const filteredAvgRiskScore = useMemo(() => {
+    const scored = filteredRisks.filter(r => r.score > 0);
+    return scored.length ? Math.round((scored.reduce((sum, r) => sum + r.score, 0) / scored.length) * 10) / 10 : 0;
+  }, [filteredRisks]);
+
+  const overallRiskRating = useMemo(() => {
+    if (filteredZoneCounts.veryHigh > 0 || filteredAvgRiskScore >= 20) return 'Very High';
+    if (filteredZoneCounts.high > 0 || filteredAvgRiskScore >= 15) return 'High';
+    if (filteredZoneCounts.moderate > 0 || filteredAvgRiskScore >= 9) return 'Moderate';
+    if (filteredRisks.length === 0) return 'No Data';
+    return 'Low';
+  }, [filteredZoneCounts, filteredAvgRiskScore, filteredRisks.length]);
+
+  const overallRiskColor = overallRiskRating === 'Very High' ? SE.red : overallRiskRating === 'High' ? SE.orange : overallRiskRating === 'Moderate' ? SE.gold : overallRiskRating === 'No Data' ? palette.muted : SE.green;
+
+  const overdueAging = useMemo(() => filteredRisks.reduce((acc, risk) => {
+    const bucket = getOverdueBucket(risk);
+    if (bucket === 'Overdue >90 Days') acc.gt90 += 1;
+    else if (bucket === 'Overdue 61–90 Days') acc.d61to90 += 1;
+    else if (bucket === 'Overdue 31–60 Days') acc.d31to60 += 1;
+    else if (bucket === 'Overdue 1–30 Days') acc.d1to30 += 1;
+    return acc;
+  }, { gt90: 0, d61to90: 0, d31to60: 0, d1to30: 0 }), [filteredRisks]);
+
+  const riskRatingDistributionData = useMemo(() => [
+    { name: 'Very High', value: filteredZoneCounts.veryHigh, color: ZONE_COLORS['Very High'] },
+    { name: 'High', value: filteredZoneCounts.high, color: ZONE_COLORS.High },
+    { name: 'Moderate', value: filteredZoneCounts.moderate, color: ZONE_COLORS.Moderate },
+    { name: 'Low', value: filteredZoneCounts.low, color: ZONE_COLORS.Low },
+    { name: 'Very Low', value: filteredZoneCounts.veryLow, color: ZONE_COLORS['Very Low'] },
+  ].filter(item => item.value > 0), [filteredZoneCounts]);
+
+  const overdueAgingChartData = useMemo(() => [
+    { bucket: '1–30 Days', count: overdueAging.d1to30, color: SE.gold },
+    { bucket: '31–60 Days', count: overdueAging.d31to60, color: SE.orange },
+    { bucket: '61–90 Days', count: overdueAging.d61to90, color: '#ef4444' },
+    { bucket: '>90 Days', count: overdueAging.gt90, color: SE.red },
+  ], [overdueAging]);
+
+  const actionStatusData = useMemo(() => [
+    { name: 'Completed', value: filteredRisks.filter(r => r.currentPct >= 100 || r.progressStatus === 'Completed (100%)').length, color: SE.green },
+    { name: 'In Progress', value: filteredRisks.filter(r => r.currentPct > 0 && r.currentPct < 100).length, color: SE.gold },
+    { name: 'Not Started', value: filteredRisks.filter(r => r.currentPct <= 0).length, color: SE.red },
+  ].filter(item => item.value > 0), [filteredRisks]);
+
+  const topCriticalRisks = useMemo(() => [...filteredRisks]
+    .sort((a, b) => {
+      const severityDiff = riskSeverityRank(b) - riskSeverityRank(a);
+      if (severityDiff !== 0) return severityDiff;
+      const residualDiff = (b.residualScore || b.score) - (a.residualScore || a.score);
+      if (residualDiff !== 0) return residualDiff;
+      return getOverdueDays(b) - getOverdueDays(a);
+    })
+    .slice(0, 10), [filteredRisks]);
+
+  const activeTrendWeeks = useMemo(() => {
+    const labels = identificationFilterActive ? quarterTrendMonthLabels(safeSelectedIdentificationPeriods, weeks) : weeks.map(w => w.label);
+    const selected = weeks.filter(w => labels.includes(w.label));
+    return selected.length ? selected : weeks;
+  }, [weeks, identificationFilterActive, safeSelectedIdentificationPeriods]);
+
+  const weeklyMovementData = useMemo(() => activeTrendWeeks.map((w, index) => {
+    const monthRisks = riskRegister
+      .filter(r => riskIsIdentifiedByMonth(r, w.label, firstReportMonth, hasIdentificationDates))
+      .map(r => monthScopedRisk(r, [w.label], weeks))
+      .filter(applyDashboardFilters);
+    const values = monthRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
+    const overallProgress = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
     const completed = values.filter(value => value >= 100).length;
-    const previousValues = index > 0 ? filteredRisks.map(r => Math.round((r.weekProgress[weeks[index - 1].label] ?? 0) * 100)) : values;
+    const previousLabel = index > 0 ? activeTrendWeeks[index - 1].label : w.label;
+    const previousValues = monthRisks.map(r => Math.round((r.weekProgress[previousLabel] ?? 0) * 100));
     const improved = values.filter((value, i) => value > (previousValues[i] ?? value)).length;
     const declined = values.filter((value, i) => value < (previousValues[i] ?? value)).length;
-    const monthlyThreat = filteredRisks.filter(r => (r.weekProgress[w.label] ?? 0) > 0).length;
-    return { week: w.label, avgProgress, completed, improved, declined, monthlyThreat };
-  }), [filteredRisks, weeks]);
+    const monthlyThreat = monthRisks.length;
+    const critical = monthRisks.filter(r => r.score >= 20 || /very high/i.test(r.rating)).length;
+    const high = monthRisks.filter(r => (r.score >= 15 && r.score < 20) || (/high/i.test(r.rating) && !/very high/i.test(r.rating))).length;
+    return { week: w.label, overallProgress, avgProgress: overallProgress, completed, improved, declined, monthlyThreat, critical, high };
+  }), [riskRegister, weeks, activeTrendWeeks, applyDashboardFilters]);
 
   // Multi-week Target vs Actual trend
   // Target = average of all risks' target (100%) weighted by how many are expected complete per week.
   // Since no per-week target column exists in the Excel, we use a linear ramp:
   // target for week N = round( (N / totalWeeks) * 100 ) — i.e. equal progress expected each week.
   const weeklyTargetVsActualData = useMemo(() => {
-    const total = weeks.length || 1;
-    return weeks.map((w, index) => {
-      const values = filteredRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
+    const total = activeTrendWeeks.length || 1;
+    return activeTrendWeeks.map((w, index) => {
+      const monthRisks = riskRegister
+        .filter(r => riskIsIdentifiedByMonth(r, w.label, firstReportMonth, hasIdentificationDates))
+        .map(r => monthScopedRisk(r, [w.label], weeks))
+        .filter(applyDashboardFilters);
+      const values = monthRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
       const avgActual = values.length ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
       const avgTarget = Math.round(((index + 1) / total) * 100);
       const dev = avgActual - avgTarget;
       return { week: w.label, avgActual, avgTarget, dev };
     });
-  }, [filteredRisks, weeks]);
+  }, [riskRegister, weeks, activeTrendWeeks, applyDashboardFilters]);
 
   const ownerHighRiskData = useMemo(() => {
     const map: Record<string, { count: number; totalPct: number; highCount: number }> = {};
@@ -780,9 +1220,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   }, [filteredRisks]);
 
   const selectedChartData = activeRisk ? [
-    { name: 'Current %', value: activeRisk.currentPct, color: SE.green },
-    { name: 'Before %', value: activeRisk.beforePct, color: SE.gold },
-    { name: 'Development %', value: Math.abs(activeRisk.developmentPct), color: activeRisk.developmentPct >= 0 ? SE.blue : SE.red },
+    { name: 'Current', value: activeRisk.currentPct, color: SE.green },
+    { name: 'Before', value: activeRisk.beforePct, color: SE.gold },
+    { name: 'Development', value: Math.abs(activeRisk.developmentPct), color: activeRisk.developmentPct >= 0 ? SE.blue : SE.red },
   ] : [];
 
   const selectStyle: CSSProperties = {
@@ -803,15 +1243,17 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   };
 
   const resetFilters = useCallback(() => {
-    setFilterRating('All');
-    setFilterOwner('All');
-    setFilterStatus('All');
-    setFilterClosingDate('All');
-    setFilterTarget('All');
-    setFilterTrackStatus('All');
-    setFilterCategory('All');
-    setFilterRiskType('All');
+    setFilterRating([]);
+    setFilterOwner([]);
+    setFilterStatus([]);
+    setFilterClosingDate([]);
+    setFilterTarget([]);
+    setFilterTrackStatus([]);
+    setFilterCategory([]);
+    setFilterRiskType([]);
     setSearchTerm('');
+    setMatrixFilter(null);
+    setSelectedIdentificationPeriods([]);
   }, []);
 
   const handlePrint = useCallback(() => {
@@ -833,6 +1275,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       'Risk Owner': r.owner,
       Score: r.score,
       Rating: r.rating,
+      'Identification Date': r.identificationDate,
       'Closing Date': r.closingDate,
       'Progress Status': r.progressStatus,
       'Current %': r.currentPct,
@@ -964,6 +1407,40 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     });
   }, [filteredRisks, riskLogTab, riskLogSearch]);
 
+  useEffect(() => {
+    setRiskLogPage(1);
+  }, [riskLogTab, riskLogSearch, filteredRisks]);
+
+  const riskLogTotalPages = Math.max(1, Math.ceil(riskLogFiltered.length / PAGE_SIZE));
+  const safeRiskLogPage = Math.min(riskLogPage, riskLogTotalPages);
+  const riskLogStartIndex = (safeRiskLogPage - 1) * PAGE_SIZE;
+  const pagedRiskLogRisks = riskLogFiltered.slice(riskLogStartIndex, riskLogStartIndex + PAGE_SIZE);
+
+  const overdueFilteredItems = useMemo(() => filteredRisks
+    .filter(riskIsOverdue)
+    .map(r => ({
+      riskTitle: r.title,
+      owner: r.owner || '–',
+      closingDate: r.closingDate || '–',
+      progressStatus: r.progressStatus || '–',
+      currentPct: r.currentPct || 0,
+    })), [filteredRisks]);
+  const overdueTotalPages = Math.max(1, Math.ceil(overdueFilteredItems.length / PAGE_SIZE));
+  const safeOverduePage = Math.min(overduePage, overdueTotalPages);
+  const overdueStartIndex = (safeOverduePage - 1) * PAGE_SIZE;
+  const pagedOverdueItems = overdueFilteredItems.slice(overdueStartIndex, overdueStartIndex + PAGE_SIZE);
+
+  const kriFilteredItems = useMemo(() => {
+    const allItems = kriData?.items ?? [];
+    if (!hasFilters) return allItems;
+    const allowedTitles = new Set(filteredRisks.map(r => normalise(r.title)));
+    return allItems.filter(item => allowedTitles.has(normalise(item.riskTitle || '')));
+  }, [kriData, filteredRisks, hasFilters]);
+  const kriTotalPages = Math.max(1, Math.ceil(kriFilteredItems.length / PAGE_SIZE));
+  const safeKriPage = Math.min(kriPage, kriTotalPages);
+  const kriStartIndex = (safeKriPage - 1) * PAGE_SIZE;
+  const pagedKriItems = kriFilteredItems.slice(kriStartIndex, kriStartIndex + PAGE_SIZE);
+
   // ── Bottom 4-tab register state (Step 8) ─────────────────────────────────
   const [bottomTab, setBottomTab] = useState<'all' | 'high' | 'overdue' | 'search'>('all');
   const [bottomSearch, setBottomSearch] = useState('');
@@ -1013,11 +1490,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           .dashboard-shell { background-image: none !important; background: #F8FBFF !important; }
           main { max-width: 100% !important; padding: 6px 8px !important; gap: 6px !important; }
           .dashboard-section { break-inside: avoid; box-shadow: none !important; border-radius: 8px !important; }
-          .kpi-row { grid-template-columns: repeat(6, 1fr) !important; gap: 5px !important; }
-          .kpi-tile { min-height: 126px !important; }
-          .kpi-orb { width: 132px !important; height: 132px !important; }
-          .kpi-value { font-size: 23px !important; }
-          .kpi-label { font-size: 7px !important; }
+          .kpi-row { grid-template-columns: repeat(7, 1fr) !important; gap: 4px !important; }
+          .kpi-tile { min-height: 118px !important; }
+          .kpi-orb { width: 112px !important; height: 112px !important; }
+          .kpi-value { font-size: 20px !important; }
+          .kpi-label { font-size: 6.2px !important; }
           .chart-row { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important; }
           .professional-chart-grid { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important; }
           .professional-chart-wide { grid-template-columns: 1fr 1fr !important; gap: 6px !important; }
@@ -1027,8 +1504,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           .selected-risk-section { page-break-before: always; }
           .recharts-wrapper, .recharts-surface { overflow: visible !important; }
         }
-        @media (max-width: 1320px) { .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } .professional-chart-grid, .professional-chart-wide { grid-template-columns: 1fr !important; } }
-        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-tile { min-height: 210px !important; } .kpi-orb { width: 164px !important; height: 164px !important; } }
+        @media (max-width: 1320px) { .kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; } .professional-chart-grid, .professional-chart-wide { grid-template-columns: 1fr !important; } }
+        @media (max-width: 980px) { .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
+        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-tile { min-height: 162px !important; } .kpi-orb { width: 138px !important; height: 138px !important; } }
       `}</style>
 
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
@@ -1059,33 +1537,17 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
           </div>
 
-          {/* Title */}
-          <div style={{ flex: 1, padding: '0 20px', minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>ENTERPRISE RISK MANAGEMENT DASHBOARD</div>
+          {/* Title + executive risk posture badge */}
+          <div style={{ flex: 1, padding: '0 20px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>ENTERPRISE RISK MANAGEMENT DASHBOARD</div>
+              <div style={{ fontSize: 10, fontWeight: 750, color: 'rgba(255,255,255,.56)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Snapshot: {identificationFilterActive ? `${selectedIdentificationSnapshotPeriod} → ${selectedSnapshotMonth}` : selectedSnapshotMonth || selectedWeek || period} · Trend: {selectedMonthSummary}</div>
+            </div>
+            <span title="Overall risk rating from filtered dataset" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, borderRadius: 999, padding: '0 10px', background: `${overallRiskColor}22`, border: `1px solid ${overallRiskColor}`, color: overallRiskColor, fontSize: 10, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              <AlertTriangle size={12} /> Overall Risk Rating: {overallRiskRating}
+            </span>
           </div>
 
-          {/* Search bar */}
-          <div style={{ position: 'relative', flexShrink: 0, marginRight: 12 }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.35)', pointerEvents: 'none' }} />
-            <input
-              placeholder="Search…"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '5px 12px 5px 30px', color: 'rgba(255,255,255,0.85)', fontSize: 11, fontFamily: 'Inter, sans-serif', outline: 'none', width: 180, height: 30 }}
-            />
-          </div>
-
-          {/* Week selector */}
-          <div style={{ position: 'relative', flexShrink: 0, marginRight: 12 }}>
-            <select
-              value={selectedWeek || ''}
-              onChange={e => onWeekChange(e.target.value)}
-              style={{ appearance: 'none', WebkitAppearance: 'none', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '5px 28px 5px 12px', color: 'rgba(255,255,255,0.85)', fontSize: 11, fontFamily: 'DM Sans, Inter, sans-serif', fontWeight: 700, cursor: 'pointer', outline: 'none', height: 30 }}
-            >
-              {(weeks?.length > 0 ? weeks : [{ label: selectedWeek || 'Current', colIndex: 0 }]).map(w => <option key={w.label} value={w.label} style={{ background: '#0b1120', color: '#e0f2fe' }}>{w.label}</option>)}
-            </select>
-            <svg style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
-          </div>
 
           {/* Theme toggle */}
           <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: 2, gap: 0, flexShrink: 0, height: 30, marginRight: 12 }}>
@@ -1193,18 +1655,33 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             })}
           </div>
 
-          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: 10, borderRadius: 16, background: palette.card, border: `1px solid ${palette.border}`, boxShadow: palette.shadow, backdropFilter: 'blur(14px)' }}>
+          <div className="no-print global-filter-bar" style={{ position: 'relative', zIndex: 6000, isolation: 'isolate', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', overflow: 'visible', padding: 10, borderRadius: 16, background: palette.card, border: `1px solid ${palette.border}`, boxShadow: palette.shadow, backdropFilter: 'blur(14px)' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 950, marginRight: 2 }}><Filter size={13} />Global Filters</span>
-            <select value={filterRating} onChange={e => setFilterRating(e.target.value)} style={selectStyle}>{uniqueRatings.map(r => <option key={r} value={r}>{r === 'All' ? 'All Ratings' : r}</option>)}</select>
-            <select value={filterOwner} onChange={e => setFilterOwner(e.target.value)} style={selectStyle}>{uniqueOwners.map(o => <option key={o} value={o}>{o === 'All' ? 'All Owners' : o}</option>)}</select>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={selectStyle}>{uniqueStatuses.map(s => <option key={s} value={s}>{s === 'All' ? 'All Progress Statuses' : s}</option>)}</select>
-            <select value={filterClosingDate} onChange={e => setFilterClosingDate(e.target.value)} style={selectStyle}>{uniqueClosingDates.map(d => <option key={d} value={d}>{d === 'All' ? 'All Closing Dates' : d}</option>)}</select>
-            <select value={filterTarget} onChange={e => setFilterTarget(e.target.value)} style={selectStyle}>{targetOptions.map(t => <option key={t} value={t}>{t === 'All' ? 'All Target Status' : t}</option>)}</select>
-            <select value={filterTrackStatus} onChange={e => setFilterTrackStatus(e.target.value)} style={selectStyle}>{trackOptions.map(t => <option key={t} value={t}>{t === 'All' ? 'Overdue + In Track' : t}</option>)}</select>
-            <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} style={selectStyle}>{uniqueCategories.map(c => <option key={c} value={c}>{c === 'All' ? 'All Risk Categories' : c}</option>)}</select>
-            <select value={filterRiskType} onChange={e => setFilterRiskType(e.target.value)} style={selectStyle}>{uniqueRiskTypes.map(t => <option key={t} value={t}>{t === 'All' ? 'All Risk Types' : t}</option>)}</select>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <Search size={13} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: palette.muted, pointerEvents: 'none' }} />
+              <input
+                placeholder="Search risks, owners, categories…"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                style={{ background: palette.cardSolid, border: `1px solid ${searchTerm ? SE.blue : palette.border}`, borderRadius: 999, padding: '0 12px 0 31px', color: palette.text, fontSize: 11, fontWeight: 850, fontFamily: 'DM Sans, Inter, sans-serif', outline: 'none', width: 220, height: 34 }}
+              />
+            </div>
+            <MultiSelectFilter label="Ratings" allLabel="All Ratings" options={uniqueRatings} selected={filterRating} onChange={setFilterRating} palette={palette} minWidth={126} />
+            <MultiSelectFilter label="Owners" allLabel="All Owners" options={uniqueOwners} selected={filterOwner} onChange={setFilterOwner} palette={palette} minWidth={130} />
+            <MultiSelectFilter label="Statuses" allLabel="All Progress Statuses" options={uniqueStatuses} selected={filterStatus} onChange={setFilterStatus} palette={palette} minWidth={170} />
+            <MultiSelectFilter label="Identification Dates" allLabel="All Identification Dates" options={identificationPeriodOptions} selected={safeSelectedIdentificationPeriods} onChange={setSelectedIdentificationPeriods} palette={palette} minWidth={180} />
+            <MultiSelectFilter label="Closing Dates" allLabel="All Closing Dates" options={uniqueClosingDates} selected={filterClosingDate} onChange={setFilterClosingDate} palette={palette} minWidth={155} />
+            <MultiSelectFilter label="Target Status" allLabel="All Target Status" options={targetOptions} selected={filterTarget} onChange={setFilterTarget} palette={palette} minWidth={150} />
+            <MultiSelectFilter label="Track Status" allLabel="Overdue + In Track" options={trackOptions} selected={filterTrackStatus} onChange={setFilterTrackStatus} palette={palette} minWidth={160} />
+            <MultiSelectFilter label="Categories" allLabel="All Risk Categories" options={uniqueCategories} selected={filterCategory} onChange={setFilterCategory} palette={palette} minWidth={165} />
+            <MultiSelectFilter label="Risk Types" allLabel="All Risk Types" options={uniqueRiskTypes} selected={filterRiskType} onChange={setFilterRiskType} palette={palette} minWidth={145} />
+            {matrixFilter && (
+              <button type="button" onClick={() => setMatrixFilter(null)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${SE.blue}`, borderRadius: 999, background: 'rgba(0,120,255,.14)', color: SE.blue, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 900, cursor: 'pointer' }}>
+                Matrix L{matrixFilter.likelihood} × I{matrixFilter.impact} <X size={12} />
+              </button>
+            )}
             {hasFilters && <button onClick={resetFilters} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.border}`, borderRadius: 999, background: palette.cardSolid, color: palette.text, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}><RotateCcw size={12} />Clear</button>}
-            <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 850, whiteSpace: 'nowrap' }}>Filtered {filteredRisks.length} of {riskRegister.length}</span>
+            <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 850, whiteSpace: 'nowrap' }}>ID Snapshot: {identificationFilterActive ? `${selectedIdentificationSnapshotPeriod} → ${selectedSnapshotMonth}` : selectedMonthSummary} · Filtered {filteredRisks.length} of {snapshotRiskRegister.length}</span>
           </div>
 
           {activeMainTab === 'overview' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1214,14 +1691,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
 
             {/* ── ROW 1: large circular KPI cards with the rectangular-version icons ── */}
-            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(180px, 1fr))', gap: 14, alignItems: 'center' }}>
+            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(122px, 1fr))', gap: 8, alignItems: 'center' }}>
               {[
-                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={24} />, sub: `${selectedWeek}` },
-                { label: 'Active Threats', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={24} />, sub: 'High + Very High' },
-                { label: 'High Severity', value: filteredZoneCounts.veryHigh, color: SE.orange, icon: <Activity size={24} />, sub: 'Very High zone' },
-                { label: 'Overdue', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={24} />, sub: 'Past closing date' },
-                { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={24} />, sub: 'Filtered action count' },
-                { label: 'Overall Risk Health', value: filteredOverallHealth, color: SE.green, icon: <TrendingUp size={24} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} of ${filteredRisks.length} on target`, isPercent: true },
+                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={19} />, sub: `Snapshot: ${identificationFilterActive ? selectedIdentificationSnapshotPeriod : (selectedSnapshotMonth || period)}` },
+                { label: 'Very High / High', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={19} />, sub: `${filteredZoneCounts.veryHigh} VH · ${filteredZoneCounts.high} H` },
+                { label: 'Moderate Risks', value: filteredZoneCounts.moderate, color: SE.gold, icon: <Activity size={19} />, sub: 'Requires monitoring' },
+                { label: 'Low Risks', value: filteredZoneCounts.low + filteredZoneCounts.veryLow, color: SE.green, icon: <TrendingDown size={19} />, sub: `${filteredZoneCounts.low} Low · ${filteredZoneCounts.veryLow} VL` },
+                { label: 'Overdue Actions', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={19} />, sub: `>90:${overdueAging.gt90} · 61-90:${overdueAging.d61to90} · 1-30:${overdueAging.d1to30}` },
+                { label: 'Below Target', value: filteredRisks.filter(r => r.belowTarget).length, color: SE.orange, icon: <TrendingDown size={19} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} above target` },
+                { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={19} />, sub: 'Filtered action count' },
               ].map((card, i) => (
                 <KpiTile
                   key={card.label}
@@ -1241,13 +1719,60 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           </SectionCard>
 
 
-          <SectionCard id="overview-focus-section" title="Executive Focus" palette={palette} compact open={true} onOpenChange={() => undefined}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 10 }}>
-              <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 950, color: palette.text, marginBottom: 6 }}>Overview is now for the 5-second executive answer.</div>
-                <div style={{ fontSize: 11, lineHeight: 1.65, color: palette.muted }}>Only the executive KPI strip remains here. All charts, matrix analysis, trend charts, department comparisons, and mitigation performance visuals are grouped under the Analytics tab.</div>
+          <SectionCard id="overview-focus-section" title="Executive Focus — Heatmap + Top 10 Critical Risks" palette={palette} compact open={true} onOpenChange={() => undefined}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12, alignItems: 'stretch' }}>
+              <div style={{ ...chartBox(palette), minHeight: 420 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+                  <div>
+                    <h3 style={chartTitle(palette)}>Risk Matrix Heatmap</h3>
+                    <div style={{ fontSize: 10.5, color: palette.muted, fontWeight: 750 }}>Click any populated cell to filter the dashboard by likelihood × impact.</div>
+                  </div>
+                  {matrixFilter && <button type="button" onClick={() => setMatrixFilter(null)} style={{ border: `1px solid ${SE.blue}`, background: 'rgba(0,120,255,.13)', color: SE.blue, borderRadius: 999, height: 28, padding: '0 10px', fontSize: 10, fontWeight: 900, cursor: 'pointer' }}>Clear Matrix Filter</button>}
+                </div>
+                <RiskHeatMap risks={filteredRisks} palette={palette} isDark={isDark} selectedCell={matrixFilter} onCellSelect={cell => setMatrixFilter(prev => prev?.likelihood === cell.likelihood && prev?.impact === cell.impact ? null : { likelihood: cell.likelihood, impact: cell.impact })} />
               </div>
-              <button type="button" onClick={() => setActiveMainTab('analytics')} style={{ background: 'linear-gradient(135deg, #0078FF 0%, #00AEEF 100%)', color: '#fff', border: 'none', borderRadius: 14, cursor: 'pointer', fontSize: 12, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', padding: 14, minHeight: 86 }}>Open Analytics Charts →</button>
+
+              <div style={{ ...chartBox(palette), minHeight: 420, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                  <h3 style={chartTitle(palette)}>Top 10 Critical Risks</h3>
+                  <span style={{ fontSize: 10, fontWeight: 900, color: overallRiskColor, background: `${overallRiskColor}18`, border: `1px solid ${overallRiskColor}`, borderRadius: 999, padding: '3px 9px' }}>{overallRiskRating}</span>
+                </div>
+                <div style={{ border: `1px solid ${palette.border}`, borderRadius: 12, overflow: 'hidden', flex: 1 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 10.5 }}>
+                    <thead>
+                      <tr style={{ background: palette.tableHead, color: '#fff' }}>
+                        {['Risk', 'Category', 'Rating', 'Residual', 'Owner', 'Overdue'].map((h, i) => <th key={h} style={{ padding: '7px 8px', textAlign: i === 3 ? 'center' : 'left', fontWeight: 950, fontSize: 9.5, whiteSpace: 'nowrap' }}>{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topCriticalRisks.length === 0 ? (
+                        <tr><td colSpan={6} style={{ padding: 18, color: palette.muted, textAlign: 'center' }}>No matching risks</td></tr>
+                      ) : topCriticalRisks.map((r, i) => {
+                        const overdueBucket = getOverdueBucket(r);
+                        const ratingColor = getRatingColor(r.rating || riskRatingLabelFromScore(r.score));
+                        return (
+                          <tr key={r.id || i} onClick={() => setActiveRisk(r)} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}`, cursor: 'pointer' }}>
+                            <td style={{ padding: '7px 8px', color: palette.text, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</td>
+                            <td style={{ padding: '7px 8px', color: palette.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.category || '–'}</td>
+                            <td style={{ padding: '7px 8px' }}><span style={{ color: ratingColor, background: `${ratingColor}1f`, border: `1px solid ${ratingColor}`, borderRadius: 999, padding: '2px 7px', fontSize: 9, fontWeight: 900, whiteSpace: 'nowrap' }}>{r.rating || riskRatingLabelFromScore(r.score)}</span></td>
+                            <td style={{ padding: '7px 8px', color: getScoreColor(r.residualScore || r.score), textAlign: 'center', fontWeight: 950 }}>{r.residualScore || r.score}</td>
+                            <td style={{ padding: '7px 8px', color: SE.cyan, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.owner || '–'}</td>
+                            <td style={{ padding: '7px 8px', color: overdueBucket === 'On Track' ? SE.green : SE.red, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{overdueBucket}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 10 }}>
+                  {[
+                    ['1–30', overdueAging.d1to30, SE.gold],
+                    ['31–60', overdueAging.d31to60, SE.orange],
+                    ['61–90', overdueAging.d61to90, '#ef4444'],
+                    ['>90', overdueAging.gt90, SE.red],
+                  ].map(([label, value, color]) => <div key={String(label)} style={{ textAlign: 'center', border: `1px solid ${color}`, background: `${color}15`, borderRadius: 10, padding: '7px 5px' }}><div style={{ color: String(color), fontWeight: 950, fontSize: 16 }}>{value}</div><div style={{ color: palette.muted, fontWeight: 800, fontSize: 9 }}>{label} days</div></div>)}
+                </div>
+              </div>
             </div>
           </SectionCard>
 
@@ -1267,23 +1792,23 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             <h2 style={analyticsGroupTitle(palette)}>1. Risk Posture Relationship</h2>
             <div className="professional-chart-wide" style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 12, marginBottom: 20 }}>
               <div style={chartBox(palette)}>
-                <h3 style={chartTitle(palette)}>Risk Matrix Heatmap</h3>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginBottom: 8 }}>
-                  {[['Very High (20-25)', ZONE_COLORS['Very High']], ['High (15-19)', ZONE_COLORS.High], ['Moderate (8-14)', ZONE_COLORS.Moderate], ['Low (2-4)', ZONE_COLORS.Low], ['Very Low (1-4)', ZONE_COLORS['Very Low']]].map(([l, c]) => (
-                    <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: palette.muted }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 2, background: c, flexShrink: 0 }} />{l}
-                    </span>
-                  ))}
+                <h3 style={chartTitle(palette)}>Risk Rating Distribution</h3>
+                <ResponsiveContainer width="100%" height={286}>
+                  <PieChart>
+                    <Pie data={riskRatingDistributionData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={72} outerRadius={106} paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}>
+                      {riskRatingDistributionData.map(item => <Cell key={item.name} fill={item.color} />)}
+                    </Pie>
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={legendStyle}>
+                  {riskRatingDistributionData.map(item => <span key={item.name} style={legendItem(palette)}><span style={{ width: 10, height: 10, borderRadius: 3, background: item.color }} />{item.name} ({item.value})</span>)}
                 </div>
-                <RiskHeatMap risks={filteredRisks} palette={palette} isDark={isDark} />
-                <p style={{ fontSize: 9, color: palette.muted, marginTop: 6, lineHeight: 1.5 }}>
-                  <strong>Score Matrix Reference:</strong> Score = Likelihood × Impact. This is the primary risk concentration view.
-                </p>
               </div>
 
               <div style={chartBox(palette)}>
                 <h3 style={chartTitle(palette)}>Average Risk Score Gauge</h3>
-                <ProgressGauge score={kpis.avgRiskScore} palette={palette} />
+                <ProgressGauge score={filteredAvgRiskScore || kpis.avgRiskScore} palette={palette} />
                 <div style={{ marginTop: 4, borderTop: `1px solid ${palette.border}`, paddingTop: 10, fontSize: 10.5, color: palette.muted, lineHeight: 1.55 }}>
                   <strong style={{ color: palette.text }}>Purpose:</strong> one posture score to support executive escalation before drilling into owners, departments, and mitigations.
                 </div>
@@ -1525,6 +2050,40 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               })}
             </div>
           </SectionCard>
+
+          <SectionCard id="action-performance-section" title="Action Performance — Status + Overdue Aging" palette={palette} compact open={true} onOpenChange={() => undefined}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.35fr', gap: 12 }}>
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Action Status</h3>
+                <ResponsiveContainer width="100%" height={246}>
+                  <PieChart>
+                    <Pie data={actionStatusData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={58} outerRadius={88} paddingAngle={3}>
+                      {actionStatusData.map(item => <Cell key={item.name} fill={item.color} />)}
+                    </Pie>
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={legendStyle}>
+                  {actionStatusData.map(item => <span key={item.name} style={legendItem(palette)}><span style={{ width: 10, height: 10, borderRadius: 3, background: item.color }} />{item.name} ({item.value})</span>)}
+                </div>
+              </div>
+
+              <div style={chartBox(palette)}>
+                <h3 style={chartTitle(palette)}>Overdue Categories</h3>
+                <ResponsiveContainer width="100%" height={246}>
+                  <BarChart data={overdueAgingChartData} margin={{ top: 18, right: 22, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
+                    <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: palette.text, fontWeight: 800 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: palette.muted }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                    <Tooltip content={<ChartTooltip palette={palette} />} />
+                    <Bar dataKey="count" name="Overdue Actions" radius={[5, 5, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 10, fontWeight: 900, fill: palette.text, formatter: (v: number) => v }}>
+                      {overdueAgingChartData.map(item => <Cell key={item.bucket} fill={item.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </SectionCard>
           </div>}
 
           {activeMainTab === 'register' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1532,7 +2091,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="risk-register-section" title={`Risk Register — ${selectedWeek || period}`} palette={palette} bodyRef={registerRef} open={sectionOpen['risk-register-section']} onOpenChange={open => setSingleSectionOpen('risk-register-section', open)} actions={<><SmallActionButton palette={palette} onClick={exportRisksToExcel}><FileSpreadsheet size={12} />Excel</SmallActionButton><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(registerRef, 'Risk_Register.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>{weeks?.length > 1 && <SmallActionButton palette={palette} onClick={() => setShowTrend(true)}><BarChart2 size={12} />Trend</SmallActionButton>}</>}>
             <div className="no-print" style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 14, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.text, fontSize: 11, fontWeight: 900 }}><Filter size={13} />Register uses the global filters above</span>
-              <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 800 }}>Showing page {safeRegisterPage} · {filteredRisks.length} of {riskRegister.length}</span>
+              <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 800 }}>Showing page {safeRegisterPage} · {filteredRisks.length} of {snapshotRiskRegister.length}</span>
             </div>
 
             <div style={{ background: isDark ? 'rgba(14,39,79,.72)' : '#EBF8FF', border: `1px solid ${palette.border}`, borderRadius: 14, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 18, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -1588,14 +2147,14 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     <ImageDown size={12} />PNG
                   </SmallActionButton>
                 </div>
-                <div ref={selectedRef} className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 14, alignItems: 'start' }}>
+                <div ref={selectedRef} className="selected-risk-section" style={{ display: 'grid', gridTemplateColumns: 'minmax(430px, 0.95fr) minmax(0, 1.35fr)', gap: 14, alignItems: 'start' }}>
                   <div style={chartBox(palette)}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><ScoreBadge score={activeRisk.score} /><span style={{ color: getRatingColor(activeRisk.rating), fontWeight: 950, fontSize: 12 }}>{activeRisk.rating}</span><span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11 }}>{activeRisk.owner}</span></div>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={selectedChartData} margin={{ top: 18, right: 20, left: 0, bottom: 4 }}>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={selectedChartData} margin={{ top: 24, right: 18, left: 4, bottom: 8 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={palette.chartGrid} />
-                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: palette.text }} axisLine={{ stroke: palette.border }} tickLine={false} />
-                        <YAxis tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
+                        <XAxis dataKey="name" interval={0} tick={{ fontSize: 10, fill: palette.text, fontWeight: 800 }} axisLine={{ stroke: palette.border }} tickLine={false} />
+                        <YAxis width={42} tick={{ fontSize: 10, fill: palette.muted }} domain={[0, 100]} unit="%" axisLine={{ stroke: palette.border }} tickLine={false} />
                         <Tooltip content={<ChartTooltip palette={palette} />} />
                         <Bar dataKey="value" name="Value" radius={[8, 8, 0, 0]} animationDuration={650} label={{ position: 'top', fontSize: 11, fontWeight: 900, fill: palette.text, formatter: (v: number) => v > 0 ? `${v}%` : 'No Change' }}>
                           {selectedChartData.map((d, i) => <Cell key={i} fill={d.color} />)}
@@ -1606,20 +2165,20 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   <div style={{ background: palette.cardSoft, border: `1px solid ${palette.border}`, borderRadius: 16, padding: 14, color: palette.text }}>
                     <h3 style={{ margin: 0, fontFamily: 'DM Sans, sans-serif', fontSize: 14, fontWeight: 950, color: palette.text }}>Mitigation Plan</h3>
                     <p style={{ whiteSpace: 'pre-line', fontSize: 12, lineHeight: 1.6, color: palette.muted, marginTop: 8 }}>{activeRisk.mitigation || 'No mitigation details available.'}</p>
-                    <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
                       <div style={miniMetric(palette)}><span>Owner</span><strong>{activeRisk.owner || '–'}</strong></div>
                       <div style={miniMetric(palette)}><span>Closing Date</span><strong>{activeRisk.closingDate || '–'}</strong></div>
                       <div style={miniMetric(palette)}><span>Status</span><strong>{activeRisk.progressStatus || '–'}</strong></div>
                     </div>
                     {weeks?.length > 1 && <div style={{ marginTop: 12, padding: 10, borderRadius: 12, background: palette.cardSolid, border: `1px solid ${palette.border}` }}>
                       <div style={{ fontSize: 10, color: palette.muted, marginBottom: 6, fontWeight: 900 }}>Progress trend across all weeks</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto' }}>{weeks.map((w, i) => {
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: 8, overflow: 'visible' }}>{weeks.map((w, i) => {
                         const val = Math.round((activeRisk.weekProgress[w.label] ?? 0) * 100);
                         const prev = i > 0 ? Math.round((activeRisk.weekProgress[weeks[i - 1].label] ?? 0) * 100) : val;
                         const color = val > prev ? SE.green : val < prev ? SE.red : palette.muted;
                         const isSelected = w.label === selectedWeek;
                         const isPrev = w.label === prevWeekLabel;
-                        return <div key={w.label} style={{ minWidth: 72, textAlign: 'center', padding: '6px 7px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : isPrev ? 'rgba(243,156,18,.12)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : isPrev ? `1px solid ${SE.gold}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 13, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div>{isSelected && <div style={{ fontSize: 7, color: SE.blue, fontWeight: 900, marginTop: 1 }}>CURRENT</div>}{isPrev && !isSelected && <div style={{ fontSize: 7, color: SE.gold, fontWeight: 900, marginTop: 1 }}>PREVIOUS</div>}</div>;
+                        return <div key={w.label} style={{ minWidth: 0, textAlign: 'center', padding: '7px 8px', borderRadius: 10, background: isSelected ? 'rgba(0,120,255,.16)' : isPrev ? 'rgba(243,156,18,.12)' : 'transparent', border: isSelected ? `1px solid ${SE.blue}` : isPrev ? `1px solid ${SE.gold}` : `1px solid ${palette.border}` }}><div style={{ fontSize: 14, fontWeight: 950, color }}>{val}%</div><div style={{ fontSize: 8.5, color: palette.muted, marginTop: 2, whiteSpace: 'nowrap' }}>{w.label}</div>{isSelected && <div style={{ fontSize: 7.5, color: SE.blue, fontWeight: 900, marginTop: 1 }}>CURRENT</div>}{isPrev && !isSelected && <div style={{ fontSize: 7.5, color: SE.gold, fontWeight: 900, marginTop: 1 }}>PREVIOUS</div>}</div>;
                       })}</div>
                     </div>}
                   </div>
@@ -1688,12 +2247,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                 <tbody>
                   {riskLogFiltered.length === 0 ? (
                     <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: palette.muted, background: palette.cardSolid }}>No risks found.</td></tr>
-                  ) : riskLogFiltered.map((r, i) => {
+                  ) : pagedRiskLogRisks.map((r, i) => {
                     const isExpanded = expandedRiskId === r.id;
                     const ratingColor = getRatingColor(r.rating);
                     return (
-                      <>
-                        <tr key={r.id} style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid, cursor: 'pointer' }}
+                      <React.Fragment key={r.id}>
+                        <tr style={{ background: i % 2 === 0 ? palette.tableStripe : palette.cardSolid, cursor: 'pointer' }}
                           onClick={() => setExpandedRiskId(isExpanded ? null : r.id)}>
                           <td style={{ padding: '8px 10px', textAlign: 'center', color: palette.muted }}>
                             {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -1773,12 +2332,13 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                             </td>
                           </tr>
                         )}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+            <PaginationControls page={safeRiskLogPage} totalItems={riskLogFiltered.length} onPageChange={setRiskLogPage} palette={palette} label="risk log records" />
           </SectionCard>
           </div>}
 
@@ -1952,15 +2512,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="overdue-section" title="Overdue Action Alert Center" palette={palette} bodyRef={overdueRef} open={sectionOpen['overdue-section']} onOpenChange={open => setSingleSectionOpen('overdue-section', open)} actions={<SmallActionButton palette={palette} onClick={() => exportElementAsPNG(overdueRef, 'Overdue_Actions.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton>}>
             <div ref={overdueRef}>
               {/* Alert banner */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: overdueActions?.count > 0 ? 'rgba(192,57,43,.12)' : 'rgba(39,174,96,.10)', border: `1px solid ${overdueActions?.count > 0 ? SE.red : SE.green}`, borderRadius: 12, padding: '10px 16px', marginBottom: 12 }}>
-                <AlertTriangle size={18} color={overdueActions?.count > 0 ? SE.red : SE.green} />
-                <span style={{ fontWeight: 900, fontSize: 13, color: overdueActions?.count > 0 ? SE.red : SE.green }}>
-                  {overdueActions?.count > 0 ? `${overdueActions.count} overdue action${overdueActions.count > 1 ? 's' : ''} require immediate attention` : 'All actions are on schedule'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: overdueFilteredItems.length > 0 ? 'rgba(192,57,43,.12)' : 'rgba(39,174,96,.10)', border: `1px solid ${overdueFilteredItems.length > 0 ? SE.red : SE.green}`, borderRadius: 12, padding: '10px 16px', marginBottom: 12 }}>
+                <AlertTriangle size={18} color={overdueFilteredItems.length > 0 ? SE.red : SE.green} />
+                <span style={{ fontWeight: 900, fontSize: 13, color: overdueFilteredItems.length > 0 ? SE.red : SE.green }}>
+                  {overdueFilteredItems.length > 0 ? `${overdueFilteredItems.length} overdue action${overdueFilteredItems.length > 1 ? 's' : ''} require immediate attention` : 'All actions are on schedule'}
                 </span>
               </div>
-              {overdueActions?.items?.length > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              {overdueFilteredItems.length > 0 ? (
+                <div style={{ overflow: 'hidden', border: `1px solid ${palette.border}`, borderRadius: 12 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 11 }}>
                     <thead>
                       <tr style={{ background: palette.tableHead }}>
                         {['#', 'Risk Title', 'Owner', 'Closing Date', 'Status', 'Progress'].map(h => (
@@ -1969,9 +2529,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                       </tr>
                     </thead>
                     <tbody>
-                      {overdueActions.items.map((item, i) => (
+                      {pagedOverdueItems.map((item, i) => (
                         <tr key={i} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}` }}>
-                          <td style={{ padding: '8px 10px', color: SE.red, fontWeight: 900 }}>{i + 1}</td>
+                          <td style={{ padding: '8px 10px', color: SE.red, fontWeight: 900 }}>{overdueStartIndex + i + 1}</td>
                           <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 800 }}>{item.riskTitle}</td>
                           <td style={{ padding: '8px 10px', color: SE.cyan }}>{item.owner}</td>
                           <td style={{ padding: '8px 10px', color: SE.orange, fontWeight: 800 }}>{item.closingDate}</td>
@@ -1994,6 +2554,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               ) : (
                 <div style={{ textAlign: 'center', padding: '30px 0', color: SE.green, fontWeight: 800, fontSize: 13 }}>No overdue actions found</div>
               )}
+              <PaginationControls page={safeOverduePage} totalItems={overdueFilteredItems.length} onPageChange={setOverduePage} palette={palette} label="overdue actions" />
             </div>
           </SectionCard>
           </div>}
@@ -2006,7 +2567,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               {/* KPI summary row */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                 {(['on-track', 'at-risk', 'breached'] as const).map(s => {
-                  const count = kriData?.items?.filter(k => k.status === s).length ?? 0;
+                  const count = kriFilteredItems.filter(k => k.status === s).length;
                   const color = s === 'on-track' ? SE.green : s === 'at-risk' ? SE.gold : SE.red;
                   const label = s === 'on-track' ? 'On Track' : s === 'at-risk' ? 'At Risk' : 'Breached';
                   return (
@@ -2017,37 +2578,33 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   );
                 })}
               </div>
-              {/* KRI table */}
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                  <thead>
-                    <tr style={{ background: palette.tableHead }}>
-                      {['Risk Title', 'KRI Name', 'Measure', 'Unit', 'Target', 'Actual', 'Status'].map(h => (
-                        <th key={h} style={{ padding: '8px 10px', color: '#fff', fontWeight: 900, textAlign: 'left', whiteSpace: 'nowrap', fontSize: 10 }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(kriData?.items ?? []).map((item, i) => {
-                      const color = item.status === 'on-track' ? SE.green : item.status === 'at-risk' ? SE.gold : SE.red;
-                      const label = item.status === 'on-track' ? 'On Track' : item.status === 'at-risk' ? 'At Risk' : 'Breached';
-                      return (
-                        <tr key={i} style={{ background: i % 2 === 0 ? palette.tableStripe : 'transparent', borderBottom: `1px solid ${palette.border}` }}>
-                          <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 800, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.riskTitle}</td>
-                          <td style={{ padding: '8px 10px', color: SE.cyan }}>{item.kriName}</td>
-                          <td style={{ padding: '8px 10px', color: palette.muted }}>{item.kriMeasure}</td>
-                          <td style={{ padding: '8px 10px', color: palette.muted, textAlign: 'center' }}>{item.kriUnit}</td>
-                          <td style={{ padding: '8px 10px', color: SE.blue, fontWeight: 800, textAlign: 'right' }}>{item.kriTarget}</td>
-                          <td style={{ padding: '8px 10px', color, fontWeight: 900, textAlign: 'right' }}>{item.kriActual}</td>
-                          <td style={{ padding: '8px 10px' }}>
-                            <span style={{ background: `${color}22`, color, border: `1px solid ${color}`, borderRadius: 6, padding: '2px 8px', fontWeight: 800, fontSize: 10 }}>{label}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              {/* KRI traffic-light cards — 10 per page */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(150px, 1fr))', gap: 10 }}>
+                {pagedKriItems.map((item, i) => {
+                  const color = item.status === 'on-track' ? SE.green : item.status === 'at-risk' ? SE.gold : SE.red;
+                  const label = item.status === 'on-track' ? 'Above Target' : item.status === 'at-risk' ? 'Moderate' : 'Below Target';
+                  const ratio = item.kriTarget ? Math.min(140, Math.max(0, (Number(item.kriActual) / Math.max(Number(item.kriTarget), 0.0001)) * 100)) : 0;
+                  return (
+                    <div key={`${item.riskTitle}-${item.kriName}-${i}`} style={{ background: palette.cardSoft, border: `1px solid ${color}`, borderRadius: 14, padding: 12, minHeight: 166, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                        <span style={{ width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', background: color, fontWeight: 950 }}>{item.status === 'on-track' ? '✓' : item.status === 'at-risk' ? '!' : '✕'}</span>
+                        <span style={{ fontSize: 9.5, fontWeight: 950, color, border: `1px solid ${color}`, borderRadius: 999, padding: '2px 7px', background: `${color}18`, whiteSpace: 'nowrap' }}>{label}</span>
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 950, color: palette.text, lineHeight: 1.25, minHeight: 28, overflow: 'hidden' }} title={item.kriName}>{item.kriName || 'KRI'}</div>
+                      <div style={{ fontSize: 9.5, color: palette.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={item.riskTitle}>{item.riskTitle}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 'auto' }}>
+                        <div style={{ background: palette.cardSolid, borderRadius: 10, padding: '6px 8px', border: `1px solid ${palette.border}` }}><div style={{ fontSize: 8.5, color: palette.muted, fontWeight: 800 }}>Target</div><div style={{ fontSize: 15, color: SE.blue, fontWeight: 950 }}>{item.kriTarget}</div></div>
+                        <div style={{ background: palette.cardSolid, borderRadius: 10, padding: '6px 8px', border: `1px solid ${palette.border}` }}><div style={{ fontSize: 8.5, color: palette.muted, fontWeight: 800 }}>Actual</div><div style={{ fontSize: 15, color, fontWeight: 950 }}>{item.kriActual}</div></div>
+                      </div>
+                      <div style={{ height: 8, borderRadius: 999, background: palette.border, overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.min(100, ratio)}%`, height: '100%', background: color, borderRadius: 999 }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+              {pagedKriItems.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: palette.muted, border: `1px dashed ${palette.border}`, borderRadius: 12 }}>No KRI records match the selected filters.</div>}
+              <PaginationControls page={safeKriPage} totalItems={kriFilteredItems.length} onPageChange={setKriPage} palette={palette} label="KRI records" />
             </div>
           </SectionCard>
 
@@ -2240,7 +2797,7 @@ function cellColor(likelihood: number, impact: number): string {
   return '#2ECC71';                     // Very Low
 }
 
-function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: ThemePalette; isDark: boolean }) {
+function RiskHeatMap({ risks, palette, isDark, selectedCell, onCellSelect }: { risks: RiskRow[]; palette: ThemePalette; isDark: boolean; selectedCell?: { likelihood: number; impact: number } | null; onCellSelect?: (cell: HeatMapCell) => void }) {
   const [hoveredCell, setHoveredCell] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; cell: HeatMapCell } | null>(null);
 
@@ -2293,13 +2850,14 @@ function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: Th
                 const key = `${li}-${ii}`;
                 const bg = cellColor(li + 1, ii + 1);
                 const count = cell.risks.length;
+                const isSelected = selectedCell?.likelihood === cell.likelihood && selectedCell?.impact === cell.impact;
                 return (
                   <div
                     key={ii}
                     style={{
                       flex: 1, minHeight: 52, margin: '0 2px', borderRadius: 8,
                       background: count > 0 ? bg : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                      border: `2px solid ${count > 0 ? bg : palette.border}`,
+                      border: isSelected ? `3px solid ${SE.blue}` : `2px solid ${count > 0 ? bg : palette.border}`,
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       cursor: count > 0 ? 'pointer' : 'default',
                       opacity: count > 0 ? 1 : 0.35,
@@ -2315,6 +2873,7 @@ function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: Th
                       }
                     }}
                     onMouseLeave={() => { setHoveredCell(null); setTooltip(null); }}
+                    onClick={() => { if (count > 0) onCellSelect?.(cell); }}
                   >
                     {count > 0 && (
                       <>
@@ -2368,7 +2927,7 @@ function RiskHeatMap({ risks, palette, isDark }: { risks: RiskRow[]; palette: Th
       {/* Score matrix reference */}
       <div style={{ marginTop: 8, padding: '8px 12px', background: palette.cardSoft, borderRadius: 10, border: `1px solid ${palette.border}` }}>
         <span style={{ fontSize: 10, fontWeight: 900, color: palette.text }}>Score Matrix Reference: </span>
-        <span style={{ fontSize: 10, color: palette.muted }}>Score = Likelihood × Impact. Hover over any cell to see the risks plotted there.</span>
+        <span style={{ fontSize: 10, color: palette.muted }}>Score = Likelihood × Impact. Hover to inspect risks; click a populated cell to filter the dashboard.</span>
       </div>
     </div>
   );
@@ -2452,124 +3011,60 @@ const TAXONOMY_COLORS = [
 
 function RiskTaxonomyChart({ data, palette }: { data: { categories: { name: string; count: number; subCategories: { name: string; count: number }[] }[]; riskTypes: { name: string; count: number }[] }; palette: ThemePalette }) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-
-  const total = data.categories.reduce((a, b) => a + b.count, 0);
-
+  const total = data.categories.reduce((a, b) => a + b.count, 0) || 1;
+  const maxCategory = Math.max(1, ...data.categories.map(c => c.count));
   const activeCat = activeCategory ? data.categories.find(c => c.name === activeCategory) : null;
 
   return (
-    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-
-      {/* Left: Category donut + sub-category drill-down */}
-      <div style={{ flex: '2 1 340px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ ...chartBox(palette), display: 'flex', flexDirection: 'column' }}>
-          <h3 style={chartTitle(palette)}>Risk Categories — Click to drill down</h3>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            {/* Donut */}
-            <div style={{ flex: '0 0 200px' }}>
-              <ResponsiveContainer width={200} height={200}>
-                <PieChart>
-                  <Pie
-                    data={data.categories}
-                    dataKey="count"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    onClick={(entry: any) => setActiveCategory(prev => prev === entry.name ? null : entry.name)}
-                  >
-                    {data.categories.map((cat, i) => (
-                      <Cell
-                        key={cat.name}
-                        fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]}
-                        stroke={activeCategory === cat.name ? '#fff' : 'transparent'}
-                        strokeWidth={activeCategory === cat.name ? 3 : 0}
-                        opacity={activeCategory && activeCategory !== cat.name ? 0.4 : 1}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const d = payload[0].payload;
-                      return (
-                        <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
-                          <div style={{ fontWeight: 900, color: palette.text }}>{d.name}</div>
-                          <div style={{ color: palette.muted }}>{d.count} risk{d.count > 1 ? 's' : ''} ({Math.round(d.count / total * 100)}%)</div>
-                        </div>
-                      );
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            {/* Category list */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5, justifyContent: 'center' }}>
-              {data.categories.map((cat, i) => (
-                <div
-                  key={cat.name}
-                  onClick={() => setActiveCategory(prev => prev === cat.name ? null : cat.name)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', opacity: activeCategory && activeCategory !== cat.name ? 0.45 : 1, transition: 'opacity 0.2s' }}
-                >
-                  <span style={{ width: 10, height: 10, borderRadius: 3, background: TAXONOMY_COLORS[i % TAXONOMY_COLORS.length], flexShrink: 0 }} />
-                  <span style={{ fontSize: 10, color: palette.text, fontWeight: 800, flex: 1 }}>{cat.name}</span>
-                  <span style={{ fontSize: 10, fontWeight: 900, color: TAXONOMY_COLORS[i % TAXONOMY_COLORS.length] }}>{cat.count}</span>
-                  <span style={{ fontSize: 9, color: palette.muted }}>({Math.round(cat.count / total * 100)}%)</span>
+    <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 14 }}>
+      <div style={chartBox(palette)}>
+        <h3 style={chartTitle(palette)}>Risks by Category</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {data.categories.map((cat, i) => {
+            const color = TAXONOMY_COLORS[i % TAXONOMY_COLORS.length];
+            const pct = Math.round((cat.count / total) * 100);
+            return (
+              <button key={cat.name} type="button" onClick={() => setActiveCategory(prev => prev === cat.name ? null : cat.name)} style={{ border: activeCategory === cat.name ? `1px solid ${color}` : `1px solid ${palette.border}`, background: activeCategory === cat.name ? `${color}14` : palette.cardSoft, borderRadius: 11, padding: '8px 10px', cursor: 'pointer', textAlign: 'left' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 190px) 1fr 44px 44px', gap: 8, alignItems: 'center' }}>
+                  <div style={{ color: palette.text, fontWeight: 900, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cat.name}>{cat.name}</div>
+                  <div style={{ height: 10, background: palette.border, borderRadius: 999, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.max(4, (cat.count / maxCategory) * 100)}%`, height: '100%', background: color, borderRadius: 999 }} />
+                  </div>
+                  <div style={{ color, fontWeight: 950, fontSize: 13, textAlign: 'right' }}>{cat.count}</div>
+                  <div style={{ color: palette.muted, fontWeight: 850, fontSize: 10, textAlign: 'right' }}>{pct}%</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {activeCat && (
+          <div style={{ marginTop: 12, padding: 12, background: palette.cardAlt, border: `1px solid ${palette.border}`, borderRadius: 12 }}>
+            <div style={{ fontWeight: 950, color: palette.text, fontSize: 11, marginBottom: 8 }}>{activeCat.name} — Sub-category drill-down</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+              {activeCat.subCategories.map((sub, i) => (
+                <div key={`${sub.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, background: palette.cardSolid, border: `1px solid ${palette.border}`, borderRadius: 9, padding: '6px 8px' }}>
+                  <span style={{ flex: 1, color: palette.muted, fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub.name}</span>
+                  <span style={{ color: SE.cyan, fontWeight: 950, fontSize: 11 }}>{sub.count}</span>
                 </div>
               ))}
             </div>
           </div>
-
-          {/* Sub-category drill-down */}
-          {activeCat && (
-            <div style={{ marginTop: 10, padding: '8px 10px', background: palette.cardAlt, borderRadius: 10, border: `1px solid ${palette.border}` }}>
-              <div style={{ fontWeight: 900, fontSize: 11, color: palette.text, marginBottom: 6 }}>{activeCat.name} — Sub-categories</div>
-              {activeCat.subCategories.map((sub, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <div style={{ flex: 1, height: 7, background: palette.border, borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${(sub.count / activeCat.count) * 100}%`, height: '100%', background: SE.cyan, borderRadius: 3 }} />
-                  </div>
-                  <span style={{ fontSize: 10, color: palette.muted, minWidth: 100 }}>{sub.name}</span>
-                  <span style={{ fontSize: 10, fontWeight: 900, color: SE.cyan }}>{sub.count}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Right: Risk Type bar chart */}
-      <div style={{ flex: '1 1 220px' }}>
-        <div style={chartBox(palette)}>
-          <h3 style={chartTitle(palette)}>Risk Type Distribution</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={data.riskTypes} layout="vertical" margin={{ top: 4, right: 40, left: 10, bottom: 4 }} barSize={16}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: palette.muted }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: palette.text, fontWeight: 700 }} axisLine={false} tickLine={false} width={110} />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  return (
-                    <div style={{ background: palette.card, border: `1px solid ${palette.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
-                      <div style={{ fontWeight: 900, color: palette.text }}>{payload[0].payload.name}</div>
-                      <div style={{ color: SE.blue }}>{payload[0].value} risks</div>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="count" name="Risks" radius={[0, 6, 6, 0]} animationDuration={700}
-                label={{ position: 'right', fontSize: 10, fontWeight: 900, fill: SE.blue, formatter: (v: number) => v }}
-              >
-                {data.riskTypes.map((_, i) => (
-                  <Cell key={i} fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+      <div style={chartBox(palette)}>
+        <h3 style={chartTitle(palette)}>Risk Type Distribution</h3>
+        <ResponsiveContainer width="100%" height={Math.max(240, data.riskTypes.length * 32)}>
+          <BarChart data={data.riskTypes} layout="vertical" margin={{ top: 6, right: 42, left: 6, bottom: 4 }} barSize={17}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={palette.chartGrid} />
+            <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: palette.muted }} axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: palette.text, fontWeight: 800 }} axisLine={false} tickLine={false} width={112} />
+            <Tooltip content={<ChartTooltip palette={palette} />} />
+            <Bar dataKey="count" name="Risks" radius={[0, 6, 6, 0]} animationDuration={700} label={{ position: 'right', fontSize: 10, fontWeight: 900, fill: SE.blue, formatter: (v: number) => v }}>
+              {data.riskTypes.map((_, i) => <Cell key={i} fill={TAXONOMY_COLORS[i % TAXONOMY_COLORS.length]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );

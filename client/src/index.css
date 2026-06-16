@@ -235,3 +235,28 @@
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Keep selected-risk detail readable: larger KPI chart, wrapping week chips, no inner scroll. */
+@media (max-width: 1180px) {
+  .selected-risk-section {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Keep global filter dropdowns above the next dashboard containers */
+.global-filter-bar {
+  overflow: visible !important;
+}
+.global-filter-bar .filter-dropdown-root {
+  overflow: visible !important;
+}
+.global-filter-bar .filter-dropdown-root[open] {
+  z-index: 12000 !important;
+}
+.global-filter-bar .filter-dropdown-menu {
+  z-index: 13000 !important;
+}
+.dashboard-section {
+  position: relative;
+  z-index: 1;
+}

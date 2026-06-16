@@ -32,6 +32,7 @@
  *   Risk Rating     → "Rating"        (fallback: "Risk Rating")
  *   Action Text     → "Action"
  *   Action Weight   → "Action Weight"
+ *   Identification  → "Identification Date" / opening date
  *   Closing Date    → "Closing Date"
  *   Progress Status → "Progress Status"
  *   Target          → "Target"        (per-action target, 0.0–1.0)
@@ -53,6 +54,7 @@ export interface RiskRow {
   owner: string;
   score: number;
   rating: string;
+  identificationDate: string;  // risk identification / opening date
   closingDate: string;
   progressStatus: string;
   weekProgress: Record<string, number>;  // key=period label, value=0.0–1.0
@@ -104,6 +106,15 @@ export interface DashboardData {
   riskSummary: { name: string; value: number; color: string }[];
   riskRegister: RiskRow[];
   selectedRisk: RiskRow | null;
+  filterOptions?: {
+    identificationDates: string[];
+    ratings: string[];
+    owners: string[];
+    progressStatuses: string[];
+    closingDates: string[];
+    categories: string[];
+    riskTypes: string[];
+  };
   mitigationTargetsByWeek?: Record<string, { aboveTarget: number; belowTarget: number }>;
   residualData: {
     zoneCounts: { veryHigh: number; high: number; moderate: number; low: number; veryLow: number };
@@ -159,6 +170,45 @@ function safeNum(v: unknown): number {
 function safeStr(v: unknown): string {
   if (v === null || v === undefined) return '';
   return String(v).trim();
+}
+
+function normalizeQuarterValue(v: unknown): string {
+  const text = safeStr(v);
+  if (!text) return '';
+
+  // Supports source values such as: 2025 Q1, 2025-Q1, 2025/Q1, Q1 2025, Q1-2025.
+  const match =
+    text.match(/(?:^|\b)(\d{4})\s*[\-\/\s]*[Qq]([1-4])(?:\b|$)/) ||
+    text.match(/(?:^|\b)[Qq]([1-4])\s*[\-\/\s]*(\d{4})(?:\b|$)/);
+
+  if (!match) return text;
+
+  const first = match[1];
+  const second = match[2];
+  const year = first.length === 4 ? Number(first) : Number(second);
+  const quarter = first.length === 4 ? Number(second) : Number(first);
+
+  return `Q${quarter} ${year}`;
+}
+
+function quarterOptionSortKey(value: string): number {
+  const text = normalizeQuarterValue(value);
+  const match = text.match(/^Q([1-4])\s+(\d{4})$/i);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  return Number(match[2]) * 4 + Number(match[1]);
+}
+
+function uniqueTextValues(values: unknown[], normalizer: (value: unknown) => string = safeStr): string[] {
+  return Array.from(new Set(values.map(normalizer).map(v => v.trim()).filter(Boolean)));
+}
+
+function sortQuarterValues(values: string[]): string[] {
+  return [...values].sort((a, b) => {
+    const ak = quarterOptionSortKey(a);
+    const bk = quarterOptionSortKey(b);
+    if (ak !== bk) return ak - bk;
+    return a.localeCompare(b);
+  });
 }
 
 function pct(v: number): number {
@@ -448,6 +498,40 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const COL_RATING       = findCol(colMap, 'rating', 'risk rating', 'inherent rating');
   const COL_ACTION       = findCol(colMap, 'action', 'mitigation action', 'mitigation', 'action description');
   const COL_ACTION_WEIGHT = findCol(colMap, 'action weight', 'weight', 'weighting');
+  const COL_IDENTIFICATION_DATE = (() => {
+    const direct = findCol(
+      colMap,
+      'identification date',
+      'identification',
+      'identified date',
+      'identified quarter',
+      'identification quarter',
+      'risk identification',
+      'risk identification date',
+      'risk identification quarter',
+      'opening date',
+      'open date',
+      'date identified',
+      'date raised'
+    );
+    if (direct >= 0) return direct;
+
+    // Last-resort fuzzy scan. Some workbooks contain hidden line breaks or
+    // unexpected wording around the Identification Date column; this keeps the
+    // dashboard filters populated from the real source column instead of showing
+    // only "All Identification Dates".
+    for (let i = 0; i < headerRow.length; i++) {
+      const h = normalizeHeaderName(headerRow[i]);
+      const compact = compactHeaderName(headerRow[i]);
+      if (
+        (h.includes('identification') || compact.includes('identification') || h.includes('identified') || compact.includes('identified')) &&
+        (h.includes('date') || h.includes('quarter') || compact.includes('date') || compact.includes('quarter'))
+      ) {
+        return i;
+      }
+    }
+    return -1;
+  })();
   const COL_CLOSING_DATE = findCol(colMap, 'closing date', 'target close', 'target close date', 'due date');
   const COL_PROGRESS_STATUS = findCol(colMap, 'progress status', 'status', 'action status');
   const COL_T_SCORE          = findCol(colMap, 't-score', 'target score', 'target risk score', 'tscore');
@@ -520,6 +604,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const ownerMap: Record<string, string> = {};
   const scoreMap: Record<string, number> = {};
   const ratingMap: Record<string, string> = {};
+  const identificationDateMap: Record<string, string> = {};
   const closingDateMap: Record<string, string> = {};
   const progressStatusMap: Record<string, string> = {};
   const aboveTargetMap: Record<string, boolean | null> = {};
@@ -536,6 +621,14 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const kriUnitMap: Record<string, string> = {};
   const kriTargetMap: Record<string, number> = {};
   const kriActualMap: Record<string, number> = {};
+
+  const sourceIdentificationValues = new Set<string>();
+  const sourceRatingValues = new Set<string>();
+  const sourceOwnerValues = new Set<string>();
+  const sourceProgressStatusValues = new Set<string>();
+  const sourceClosingDateValues = new Set<string>();
+  const sourceCategoryValues = new Set<string>();
+  const sourceRiskTypeValues = new Set<string>();
 
   let currentRisk = '';
 
@@ -566,21 +659,38 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       }
 
       // Store metadata
-      ownerMap[currentRisk]        = COL_OWNER >= 0          ? safeStr(row[COL_OWNER])       : '';
+      const ownerValue = COL_OWNER >= 0 ? safeStr(row[COL_OWNER]) : '';
+      const ratingValue = COL_RATING >= 0 ? (safeStr(row[COL_RATING]) || deriveRating(safeNum(row[COL_SCORE]))) : deriveRating(safeNum(row[COL_SCORE]));
+      const identificationValue = COL_IDENTIFICATION_DATE >= 0 ? normalizeQuarterValue(row[COL_IDENTIFICATION_DATE]) : '';
+      const closingValue = COL_CLOSING_DATE >= 0 ? safeStr(row[COL_CLOSING_DATE]) : '';
+      const progressStatusValue = COL_PROGRESS_STATUS >= 0 ? safeStr(row[COL_PROGRESS_STATUS]) : '';
+      const categoryValue = COL_CATEGORY >= 0 ? safeStr(row[COL_CATEGORY]) : '';
+      const riskTypeValue = COL_RISK_TYPE >= 0 ? safeStr(row[COL_RISK_TYPE]) : '';
+
+      ownerMap[currentRisk]        = ownerValue;
       scoreMap[currentRisk]        = COL_SCORE >= 0          ? safeNum(row[COL_SCORE])        : 0;
-      ratingMap[currentRisk]       = COL_RATING >= 0         ? (safeStr(row[COL_RATING]) || deriveRating(safeNum(row[COL_SCORE]))) : deriveRating(safeNum(row[COL_SCORE]));
-      closingDateMap[currentRisk]  = COL_CLOSING_DATE >= 0   ? safeStr(row[COL_CLOSING_DATE]) : '';
-      progressStatusMap[currentRisk] = COL_PROGRESS_STATUS >= 0 ? safeStr(row[COL_PROGRESS_STATUS]) : '';
+      ratingMap[currentRisk]       = ratingValue;
+      identificationDateMap[currentRisk] = identificationValue;
+      closingDateMap[currentRisk]  = closingValue;
+      progressStatusMap[currentRisk] = progressStatusValue;
       aboveTargetMap[currentRisk]  = COL_ABOVE_TARGET >= 0   ? markerToBool(row[COL_ABOVE_TARGET], 'above target') : null;
       belowTargetMap[currentRisk]  = COL_BELOW_TARGET >= 0   ? markerToBool(row[COL_BELOW_TARGET], 'below target') : null;
       likelihoodMap[currentRisk]   = COL_LIKELIHOOD >= 0     ? safeNum(row[COL_LIKELIHOOD])   : 0;
       impactMap[currentRisk]       = COL_IMPACT >= 0         ? safeNum(row[COL_IMPACT])       : 0;
       residualScoreMap[currentRisk]= COL_RESIDUAL_SCORE >= 0 ? safeNum(row[COL_RESIDUAL_SCORE]) : 0;
       tScoreMap[currentRisk]       = COL_T_SCORE >= 0        ? safeNum(row[COL_T_SCORE])       : 0;
-      categoryMap[currentRisk]     = COL_CATEGORY >= 0       ? safeStr(row[COL_CATEGORY])      : '';
+      categoryMap[currentRisk]     = categoryValue;
       subCategoryMap[currentRisk]  = COL_SUB_CATEGORY >= 0   ? safeStr(row[COL_SUB_CATEGORY])  : '';
-      riskTypeMap[currentRisk]     = COL_RISK_TYPE >= 0      ? safeStr(row[COL_RISK_TYPE])     : '';
+      riskTypeMap[currentRisk]     = riskTypeValue;
       kriNameMap[currentRisk]      = COL_KRI_NAME >= 0       ? safeStr(row[COL_KRI_NAME])      : '';
+
+      if (identificationValue) sourceIdentificationValues.add(identificationValue);
+      if (ratingValue) sourceRatingValues.add(ratingValue);
+      if (ownerValue) sourceOwnerValues.add(ownerValue);
+      if (progressStatusValue) sourceProgressStatusValues.add(progressStatusValue);
+      if (closingValue) sourceClosingDateValues.add(closingValue);
+      if (categoryValue) sourceCategoryValues.add(categoryValue);
+      if (riskTypeValue) sourceRiskTypeValues.add(riskTypeValue);
       kriMeasureMap[currentRisk]   = COL_KRI_MEASURE >= 0    ? safeStr(row[COL_KRI_MEASURE])   : '';
       kriUnitMap[currentRisk]      = COL_KRI_UNIT >= 0       ? safeStr(row[COL_KRI_UNIT])      : '';
       kriTargetMap[currentRisk]    = COL_KRI_TARGET >= 0     ? safeNum(row[COL_KRI_TARGET])    : 0;
@@ -634,6 +744,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       owner,
       score,
       rating,
+      identificationDate: identificationDateMap[title] ?? '',
       closingDate: closingDateMap[title] ?? '',
       progressStatus,
       mitigation: (mitigationMap[title] || []).join('\n'),
@@ -812,6 +923,15 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
     riskSummary,
     riskRegister,
     selectedRisk,
+    filterOptions: {
+      identificationDates: sortQuarterValues(Array.from(sourceIdentificationValues)),
+      ratings: Array.from(sourceRatingValues),
+      owners: Array.from(sourceOwnerValues).sort(),
+      progressStatuses: Array.from(sourceProgressStatusValues).sort(),
+      closingDates: Array.from(sourceClosingDateValues).sort(),
+      categories: Array.from(sourceCategoryValues).sort(),
+      riskTypes: Array.from(sourceRiskTypeValues).sort(),
+    },
     residualData: {
       zoneCounts: residualZoneCounts,
       avgResidualScore,
