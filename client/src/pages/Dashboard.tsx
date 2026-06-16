@@ -271,6 +271,42 @@ function riskIsOverdue(risk: RiskRow): boolean {
 }
 
 
+
+function progressStatusFromPct(value: number): string {
+  if (value >= 100) return 'Completed (100%)';
+  if (value > 0) return 'In Progress (1-99%)';
+  return 'Not Started (0%)';
+}
+
+function summarizeMonthLabels(labels: string[], totalCount: number): string {
+  if (!labels.length || labels.length === totalCount) return 'All Months';
+  if (labels.length === 1) return labels[0];
+  return `${labels.length} Months`;
+}
+
+function monthScopedRisk(risk: RiskRow, monthLabels: string[], orderedWeeks: { label: string }[]): RiskRow {
+  const labels = monthLabels.length ? monthLabels : orderedWeeks.map(w => w.label);
+  const orderedLabels = orderedWeeks.map(w => w.label).filter(label => labels.includes(label));
+  const activeLabels = orderedLabels.length ? orderedLabels : labels;
+  const values = activeLabels.map(label => risk.weekProgress[label] ?? 0);
+  const avgValue = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : (risk.currentPct || 0) / 100;
+  const currentPct = Math.round(avgValue > 1 ? avgValue : avgValue * 100);
+  const firstSelectedIndex = orderedWeeks.findIndex(w => w.label === activeLabels[0]);
+  const prevLabel = firstSelectedIndex > 0 ? orderedWeeks[firstSelectedIndex - 1]?.label : activeLabels[0];
+  const prevVal = prevLabel ? (risk.weekProgress[prevLabel] ?? avgValue) : avgValue;
+  const beforePct = Math.round(prevVal > 1 ? prevVal : prevVal * 100);
+  return {
+    ...risk,
+    currentPct,
+    beforePct,
+    developmentPct: currentPct - beforePct,
+    progressStatus: progressStatusFromPct(currentPct),
+    aboveTarget: currentPct >= 100,
+    belowTarget: currentPct < 100,
+    isOverdue: currentPct < 100 && riskIsOverdue({ ...risk, currentPct, isOverdue: false }),
+  };
+}
+
 function riskSeverityRank(risk: RiskRow): number {
   const rating = (risk.rating || '').toLowerCase();
   if (rating.includes('very high') || risk.score >= 20) return 5;
@@ -417,36 +453,36 @@ function KpiTile({ label, value, isText, color, selectedWeek, index, icon, sub, 
   const ringPct = isText ? 78 : isPercent ? Math.max(20, Math.min(94, Number.isFinite(numeric) ? numeric : 55)) : Math.max(20, Math.min(94, Number.isFinite(numeric) ? numeric : 55));
   const displayValue = isText ? value : <><AnimatedNumber animationKey={`${selectedWeek}-${index}`} value={numeric} />{isPercent ? '%' : ''}</>;
   return (
-    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 252, padding: '6px 0' }}>
+    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 188, padding: '3px 0' }}>
       <div
         className="kpi-orb"
         style={{
           '--kpi-color': color,
           '--kpi-ring': `${ringPct}%`,
-          width: 'clamp(188px, 15vw, 218px)',
-          height: 'clamp(188px, 15vw, 218px)',
+          width: 'clamp(142px, 10.6vw, 168px)',
+          height: 'clamp(142px, 10.6vw, 168px)',
           borderRadius: '50%',
           position: 'relative',
           display: 'grid',
           placeItems: 'center',
           background: `conic-gradient(from 210deg, ${color} 0 var(--kpi-ring), rgba(255,255,255,.22) var(--kpi-ring) 100%)`,
-          boxShadow: `0 28px 60px rgba(0,0,0,.28), 0 0 38px ${color}38, inset 0 0 0 1px rgba(255,255,255,.26)`,
-          border: '1px solid rgba(255,255,255,.30)',
+          boxShadow: `0 18px 40px rgba(0,0,0,.24), 0 0 24px ${color}30, inset 0 0 0 1px rgba(255,255,255,.24)`,
+          border: '1px solid rgba(255,255,255,.28)',
         } as CSSProperties}
       >
-        <div style={{ position: 'absolute', inset: 11, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 5px 25px rgba(255,255,255,.20), inset 0 -24px 38px rgba(0,0,0,.28)' }} />
-        <div style={{ position: 'absolute', inset: 25, borderRadius: '50%', background: 'radial-gradient(circle at 35% 20%, rgba(255,255,255,.28), rgba(255,255,255,.08) 38%, rgba(0,0,0,.18) 100%)', border: '1px solid rgba(255,255,255,.20)' }} />
+        <div style={{ position: 'absolute', inset: 8, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 4px 18px rgba(255,255,255,.18), inset 0 -18px 28px rgba(0,0,0,.26)' }} />
+        <div style={{ position: 'absolute', inset: 20, borderRadius: '50%', background: 'radial-gradient(circle at 35% 20%, rgba(255,255,255,.28), rgba(255,255,255,.08) 38%, rgba(0,0,0,.18) 100%)', border: '1px solid rgba(255,255,255,.18)' }} />
         {icon && (
-          <div className="kpi-icon" style={{ position: 'absolute', top: 24, width: 44, height: 44, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,.19)', border: '1px solid rgba(255,255,255,.30)', color: '#fff', boxShadow: '0 9px 20px rgba(0,0,0,.20)' }}>
+          <div className="kpi-icon" style={{ position: 'absolute', top: 16, width: 34, height: 34, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,.18)', border: '1px solid rgba(255,255,255,.28)', color: '#fff', boxShadow: '0 7px 16px rgba(0,0,0,.18)' }}>
             {icon}
           </div>
         )}
-        <div style={{ position: 'relative', width: '74%', height: '74%', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '52px 14px 14px' }}>
-          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 23 : 44, lineHeight: .96, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.055em', maxWidth: 142, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
+        <div style={{ position: 'relative', width: '76%', height: '76%', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '42px 9px 10px' }}>
+          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 18 : 32, lineHeight: .96, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.045em', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
             {displayValue}
           </div>
-          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.96)', fontSize: 11, fontWeight: 950, marginTop: 10, textTransform: 'uppercase', letterSpacing: '.052em', lineHeight: 1.15 }}>{label}</div>
-          {sub && <div className="kpi-sub" style={{ color: 'rgba(255,255,255,.74)', fontSize: 9.2, fontWeight: 850, marginTop: 7, lineHeight: 1.2, maxWidth: 132, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
+          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.96)', fontSize: 8.6, fontWeight: 950, marginTop: 7, textTransform: 'uppercase', letterSpacing: '.035em', lineHeight: 1.08, maxWidth: 116 }}>{label}</div>
+          {sub && <div className="kpi-sub" style={{ color: 'rgba(255,255,255,.74)', fontSize: 7.5, fontWeight: 850, marginTop: 5, lineHeight: 1.1, maxWidth: 112, whiteSpace: 'normal', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{sub}</div>}
         </div>
       </div>
     </div>
@@ -588,6 +624,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const [filterTrackStatus, setFilterTrackStatus] = useState('All');
   const [filterCategory, setFilterCategory] = useState('All');
   const [filterRiskType, setFilterRiskType] = useState('All');
+  const [selectedMonths, setSelectedMonths] = useState<string[]>(() => selectedWeek ? [selectedWeek] : (weeks.length ? [weeks[weeks.length - 1].label] : []));
   const [searchTerm, setSearchTerm] = useState('');
   const [matrixFilter, setMatrixFilter] = useState<{ likelihood: number; impact: number } | null>(null);
   const [registerPage, setRegisterPage] = useState(1);
@@ -660,23 +697,57 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   useEffect(() => setActiveRisk(data.selectedRisk), [data.selectedRisk, data.selectedWeek]);
 
+  const allMonthLabels = useMemo(() => weeks.map(w => w.label), [weeks]);
+  const safeSelectedMonths = useMemo(() => {
+    const valid = selectedMonths.filter(label => allMonthLabels.includes(label));
+    if (valid.length) return valid;
+    return selectedWeek && allMonthLabels.includes(selectedWeek) ? [selectedWeek] : (allMonthLabels.length ? [allMonthLabels[allMonthLabels.length - 1]] : []);
+  }, [selectedMonths, allMonthLabels, selectedWeek]);
+  const selectedMonthSummary = useMemo(() => summarizeMonthLabels(safeSelectedMonths, allMonthLabels.length), [safeSelectedMonths, allMonthLabels.length]);
+  const monthScopedRiskRegister = useMemo(() => riskRegister.map(r => monthScopedRisk(r, safeSelectedMonths, weeks)), [riskRegister, safeSelectedMonths, weeks]);
+
+  useEffect(() => {
+    if (!allMonthLabels.length) return;
+    setSelectedMonths(prev => {
+      const valid = prev.filter(label => allMonthLabels.includes(label));
+      if (valid.length) return valid;
+      return selectedWeek && allMonthLabels.includes(selectedWeek) ? [selectedWeek] : [allMonthLabels[allMonthLabels.length - 1]];
+    });
+  }, [allMonthLabels, selectedWeek]);
+
+  const toggleMonthFilter = useCallback((label: string) => {
+    setSelectedMonths(prev => {
+      if (prev.includes(label)) {
+        const next = prev.filter(item => item !== label);
+        return next.length ? next : [label];
+      }
+      return [...prev, label];
+    });
+  }, []);
+
+  const selectAllMonths = useCallback(() => setSelectedMonths(allMonthLabels), [allMonthLabels]);
+  const clearMonthSelectionToCurrent = useCallback(() => {
+    const fallback = selectedWeek && allMonthLabels.includes(selectedWeek) ? selectedWeek : allMonthLabels[allMonthLabels.length - 1];
+    if (fallback) setSelectedMonths([fallback]);
+  }, [allMonthLabels, selectedWeek]);
+
   const uniqueRatings = useMemo(() => {
-    const ratings: string[] = ['All', ...Array.from(new Set(riskRegister.map(r => r.rating).filter((value): value is string => Boolean(value))))];
+    const ratings: string[] = ['All', ...Array.from(new Set(monthScopedRiskRegister.map(r => r.rating).filter((value): value is string => Boolean(value))))];
     const order = ['All', 'Very High', 'High', 'Moderate', 'Low', 'Very Low'];
     return ratings.sort((a, b) => (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b)));
-  }, [riskRegister]);
+  }, [monthScopedRiskRegister]);
 
-  const uniqueOwners = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.owner).filter(Boolean))).sort()], [riskRegister]);
+  const uniqueOwners = useMemo(() => ['All', ...Array.from(new Set(monthScopedRiskRegister.map(r => r.owner).filter(Boolean))).sort()], [monthScopedRiskRegister]);
   const uniqueStatuses = ['All', 'Completed (100%)', 'In Progress (1-99%)', 'Not Started (0%)'];
-  const uniqueClosingDates = useMemo(() => ['All', ...sortDateLabels(Array.from(new Set(riskRegister.map(r => r.closingDate).filter(Boolean))))], [riskRegister]);
-  const uniqueCategories = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.category || 'Uncategorised'))).sort()], [riskRegister]);
-  const uniqueRiskTypes = useMemo(() => ['All', ...Array.from(new Set(riskRegister.map(r => r.riskType || 'Unknown'))).sort()], [riskRegister]);
+  const uniqueClosingDates = useMemo(() => ['All', ...sortDateLabels(Array.from(new Set(monthScopedRiskRegister.map(r => r.closingDate).filter(Boolean))))], [monthScopedRiskRegister]);
+  const uniqueCategories = useMemo(() => ['All', ...Array.from(new Set(monthScopedRiskRegister.map(r => r.category || 'Uncategorised'))).sort()], [monthScopedRiskRegister]);
+  const uniqueRiskTypes = useMemo(() => ['All', ...Array.from(new Set(monthScopedRiskRegister.map(r => r.riskType || 'Unknown'))).sort()], [monthScopedRiskRegister]);
   const targetOptions = ['All', 'Above Target', 'Below Target'];
   const trackOptions = ['All', 'Overdue', 'In Track'];
 
   const filteredRisks = useMemo(() => {
     const q = normalise(searchTerm);
-    return riskRegister.filter(r => {
+    return monthScopedRiskRegister.filter(r => {
       const category = r.category || 'Uncategorised';
       const riskType = r.riskType || 'Unknown';
       const overdue = riskIsOverdue(r);
@@ -694,7 +765,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       if (q && !normalise(`${r.title} ${r.mitigation} ${r.owner} ${r.rating} ${r.closingDate} ${category} ${riskType} ${r.progressStatus}`).includes(q)) return false;
       return true;
     });
-  }, [riskRegister, filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm]);
+  }, [monthScopedRiskRegister, filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm]);
 
   const filteredZoneCounts = useMemo(() => ({
     veryHigh: filteredRisks.filter(r => r.score >= 20 || /very high/i.test(r.rating)).length,
@@ -711,7 +782,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
 
   const filteredOverallHealth = filteredRisks.length ? Math.round((filteredRisks.filter(r => r.aboveTarget).length / filteredRisks.length) * 100) : 0;
 
-  const hasFilters = filterRating !== 'All' || filterOwner !== 'All' || filterStatus !== 'All' || filterClosingDate !== 'All' || filterTarget !== 'All' || filterTrackStatus !== 'All' || filterCategory !== 'All' || filterRiskType !== 'All' || matrixFilter !== null || searchTerm.trim().length > 0;
+  const monthFilterActive = safeSelectedMonths.length > 0 && safeSelectedMonths.length < allMonthLabels.length;
+  const hasFilters = monthFilterActive || filterRating !== 'All' || filterOwner !== 'All' || filterStatus !== 'All' || filterClosingDate !== 'All' || filterTarget !== 'All' || filterTrackStatus !== 'All' || filterCategory !== 'All' || filterRiskType !== 'All' || matrixFilter !== null || searchTerm.trim().length > 0;
 
   useEffect(() => {
     setRegisterPage(1);
@@ -720,7 +792,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     setRiskLogPage(1);
     setOverduePage(1);
     setKriPage(1);
-  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm, selectedWeek]);
+  }, [filterRating, filterOwner, filterStatus, filterClosingDate, filterTarget, filterTrackStatus, filterCategory, filterRiskType, matrixFilter, searchTerm, selectedWeek, safeSelectedMonths]);
 
   useEffect(() => {
     if (!filteredRisks.length) {
@@ -816,31 +888,39 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     })
     .slice(0, 10), [filteredRisks]);
 
-  const weeklyMovementData = useMemo(() => weeks.map((w, index) => {
+  const activeTrendWeeks = useMemo(() => {
+    const selected = weeks.filter(w => safeSelectedMonths.includes(w.label));
+    return selected.length ? selected : weeks;
+  }, [weeks, safeSelectedMonths]);
+
+  const weeklyMovementData = useMemo(() => activeTrendWeeks.map((w, index) => {
     const values = filteredRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
-    const avgProgress = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+    const overallProgress = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
     const completed = values.filter(value => value >= 100).length;
-    const previousValues = index > 0 ? filteredRisks.map(r => Math.round((r.weekProgress[weeks[index - 1].label] ?? 0) * 100)) : values;
+    const previousLabel = index > 0 ? activeTrendWeeks[index - 1].label : w.label;
+    const previousValues = filteredRisks.map(r => Math.round((r.weekProgress[previousLabel] ?? 0) * 100));
     const improved = values.filter((value, i) => value > (previousValues[i] ?? value)).length;
     const declined = values.filter((value, i) => value < (previousValues[i] ?? value)).length;
     const monthlyThreat = filteredRisks.filter(r => (r.weekProgress[w.label] ?? 0) > 0).length;
-    return { week: w.label, avgProgress, completed, improved, declined, monthlyThreat };
-  }), [filteredRisks, weeks]);
+    const critical = filteredRisks.filter(r => (r.weekProgress[w.label] ?? 0) > 0 && (r.score >= 20 || /very high/i.test(r.rating))).length;
+    const high = filteredRisks.filter(r => (r.weekProgress[w.label] ?? 0) > 0 && ((r.score >= 15 && r.score < 20) || (/high/i.test(r.rating) && !/very high/i.test(r.rating)))).length;
+    return { week: w.label, overallProgress, avgProgress: overallProgress, completed, improved, declined, monthlyThreat, critical, high };
+  }), [filteredRisks, activeTrendWeeks]);
 
   // Multi-week Target vs Actual trend
   // Target = average of all risks' target (100%) weighted by how many are expected complete per week.
   // Since no per-week target column exists in the Excel, we use a linear ramp:
   // target for week N = round( (N / totalWeeks) * 100 ) — i.e. equal progress expected each week.
   const weeklyTargetVsActualData = useMemo(() => {
-    const total = weeks.length || 1;
-    return weeks.map((w, index) => {
+    const total = activeTrendWeeks.length || 1;
+    return activeTrendWeeks.map((w, index) => {
       const values = filteredRisks.map(r => Math.round((r.weekProgress[w.label] ?? 0) * 100));
       const avgActual = values.length ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
       const avgTarget = Math.round(((index + 1) / total) * 100);
       const dev = avgActual - avgTarget;
       return { week: w.label, avgActual, avgTarget, dev };
     });
-  }, [filteredRisks, weeks]);
+  }, [filteredRisks, activeTrendWeeks]);
 
   const ownerHighRiskData = useMemo(() => {
     const map: Record<string, { count: number; totalPct: number; highCount: number }> = {};
@@ -911,7 +991,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     setFilterRiskType('All');
     setSearchTerm('');
     setMatrixFilter(null);
-  }, []);
+    setSelectedMonths(allMonthLabels);
+  }, [allMonthLabels]);
 
   const handlePrint = useCallback(() => {
     const tableWrapper = document.getElementById('risk-table-wrapper');
@@ -1146,11 +1227,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           .dashboard-shell { background-image: none !important; background: #F8FBFF !important; }
           main { max-width: 100% !important; padding: 6px 8px !important; gap: 6px !important; }
           .dashboard-section { break-inside: avoid; box-shadow: none !important; border-radius: 8px !important; }
-          .kpi-row { grid-template-columns: repeat(6, 1fr) !important; gap: 5px !important; }
-          .kpi-tile { min-height: 126px !important; }
-          .kpi-orb { width: 132px !important; height: 132px !important; }
-          .kpi-value { font-size: 23px !important; }
-          .kpi-label { font-size: 7px !important; }
+          .kpi-row { grid-template-columns: repeat(7, 1fr) !important; gap: 4px !important; }
+          .kpi-tile { min-height: 118px !important; }
+          .kpi-orb { width: 112px !important; height: 112px !important; }
+          .kpi-value { font-size: 20px !important; }
+          .kpi-label { font-size: 6.2px !important; }
           .chart-row { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important; }
           .professional-chart-grid { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important; }
           .professional-chart-wide { grid-template-columns: 1fr 1fr !important; gap: 6px !important; }
@@ -1160,8 +1241,9 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           .selected-risk-section { page-break-before: always; }
           .recharts-wrapper, .recharts-surface { overflow: visible !important; }
         }
-        @media (max-width: 1320px) { .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } .professional-chart-grid, .professional-chart-wide { grid-template-columns: 1fr !important; } }
-        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-tile { min-height: 210px !important; } .kpi-orb { width: 164px !important; height: 164px !important; } }
+        @media (max-width: 1320px) { .kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; } .professional-chart-grid, .professional-chart-wide { grid-template-columns: 1fr !important; } }
+        @media (max-width: 980px) { .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
+        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-tile { min-height: 162px !important; } .kpi-orb { width: 138px !important; height: 138px !important; } }
       `}</style>
 
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
@@ -1196,7 +1278,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <div style={{ flex: 1, padding: '0 20px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>ENTERPRISE RISK MANAGEMENT DASHBOARD</div>
-              <div style={{ fontSize: 10, fontWeight: 750, color: 'rgba(255,255,255,.56)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Reporting Period: {selectedWeek || period}</div>
+              <div style={{ fontSize: 10, fontWeight: 750, color: 'rgba(255,255,255,.56)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Reporting Period: {selectedMonthSummary || selectedWeek || period}</div>
             </div>
             <span title="Overall risk rating from filtered dataset" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, borderRadius: 999, padding: '0 10px', background: `${overallRiskColor}22`, border: `1px solid ${overallRiskColor}`, color: overallRiskColor, fontSize: 10, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 }}>
               <AlertTriangle size={12} /> Overall Risk Rating: {overallRiskRating}
@@ -1214,17 +1296,30 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             />
           </div>
 
-          {/* Week selector */}
-          <div style={{ position: 'relative', flexShrink: 0, marginRight: 12 }}>
-            <select
-              value={selectedWeek || ''}
-              onChange={e => onWeekChange(e.target.value)}
-              style={{ appearance: 'none', WebkitAppearance: 'none', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '5px 28px 5px 12px', color: 'rgba(255,255,255,0.85)', fontSize: 11, fontFamily: 'DM Sans, Inter, sans-serif', fontWeight: 700, cursor: 'pointer', outline: 'none', height: 30 }}
-            >
-              {(weeks?.length > 0 ? weeks : [{ label: selectedWeek || 'Current', colIndex: 0 }]).map(w => <option key={w.label} value={w.label} style={{ background: '#0b1120', color: '#e0f2fe' }}>{w.label}</option>)}
-            </select>
-            <svg style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
-          </div>
+          {/* Month multi-select */}
+          <details className="no-print" style={{ position: 'relative', flexShrink: 0, marginRight: 12 }}>
+            <summary style={{ listStyle: 'none', display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '5px 12px', color: 'rgba(255,255,255,0.85)', fontSize: 11, fontFamily: 'DM Sans, Inter, sans-serif', fontWeight: 800, cursor: 'pointer', outline: 'none', height: 30, minWidth: 130, justifyContent: 'space-between' }}>
+              <span>{selectedMonthSummary}</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+            </summary>
+            <div style={{ position: 'absolute', right: 0, top: 36, zIndex: 60, width: 230, maxHeight: 330, overflowY: 'auto', padding: 10, borderRadius: 14, background: isDark ? 'rgba(8,22,48,.98)' : 'rgba(255,255,255,.98)', border: `1px solid ${palette.border}`, boxShadow: palette.shadow }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <button type="button" onClick={selectAllMonths} style={{ flex: 1, border: `1px solid ${SE.blue}`, background: 'rgba(0,120,255,.13)', color: SE.blue, borderRadius: 999, height: 26, fontSize: 10, fontWeight: 900, cursor: 'pointer' }}>Select All</button>
+                <button type="button" onClick={clearMonthSelectionToCurrent} style={{ flex: 1, border: `1px solid ${palette.border}`, background: palette.cardSolid, color: palette.text, borderRadius: 999, height: 26, fontSize: 10, fontWeight: 850, cursor: 'pointer' }}>Current</button>
+              </div>
+              <div style={{ display: 'grid', gap: 5 }}>
+                {allMonthLabels.map(label => {
+                  const checked = safeSelectedMonths.includes(label);
+                  return (
+                    <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${checked ? SE.blue : palette.border}`, background: checked ? 'rgba(0,120,255,.14)' : palette.cardSolid, color: checked ? SE.blue : palette.text, borderRadius: 10, padding: '6px 8px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleMonthFilter(label)} style={{ accentColor: SE.blue }} />
+                      <span>{label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </details>
 
           {/* Theme toggle */}
           <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: 2, gap: 0, flexShrink: 0, height: 30, marginRight: 12 }}>
@@ -1348,7 +1443,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
               </button>
             )}
             {hasFilters && <button onClick={resetFilters} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.border}`, borderRadius: 999, background: palette.cardSolid, color: palette.text, height: 32, padding: '0 10px', fontSize: 11, fontWeight: 850, cursor: 'pointer' }}><RotateCcw size={12} />Clear</button>}
-            <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 850, whiteSpace: 'nowrap' }}>Filtered {filteredRisks.length} of {riskRegister.length}</span>
+            <span style={{ marginLeft: 'auto', color: palette.muted, fontSize: 11, fontWeight: 850, whiteSpace: 'nowrap' }}>{selectedMonthSummary} · Filtered {filteredRisks.length} of {riskRegister.length}</span>
           </div>
 
           {activeMainTab === 'overview' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1358,15 +1453,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
 
             {/* ── ROW 1: large circular KPI cards with the rectangular-version icons ── */}
-            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(158px, 1fr))', gap: 12, alignItems: 'center' }}>
+            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(122px, 1fr))', gap: 8, alignItems: 'center' }}>
               {[
-                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={24} />, sub: `${selectedWeek || period}` },
-                { label: 'Very High / High', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={24} />, sub: `${filteredZoneCounts.veryHigh} VH · ${filteredZoneCounts.high} H` },
-                { label: 'Moderate Risks', value: filteredZoneCounts.moderate, color: SE.gold, icon: <Activity size={24} />, sub: 'Requires monitoring' },
-                { label: 'Low Risks', value: filteredZoneCounts.low + filteredZoneCounts.veryLow, color: SE.green, icon: <TrendingDown size={24} />, sub: `${filteredZoneCounts.low} Low · ${filteredZoneCounts.veryLow} VL` },
-                { label: 'Overdue Actions', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={24} />, sub: `>90:${overdueAging.gt90} · 61-90:${overdueAging.d61to90} · 1-30:${overdueAging.d1to30}` },
-                { label: 'Below Target', value: filteredRisks.filter(r => r.belowTarget).length, color: SE.orange, icon: <TrendingDown size={24} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} above target` },
-                { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={24} />, sub: 'Filtered action count' },
+                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={19} />, sub: `${selectedWeek || period}` },
+                { label: 'Very High / High', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={19} />, sub: `${filteredZoneCounts.veryHigh} VH · ${filteredZoneCounts.high} H` },
+                { label: 'Moderate Risks', value: filteredZoneCounts.moderate, color: SE.gold, icon: <Activity size={19} />, sub: 'Requires monitoring' },
+                { label: 'Low Risks', value: filteredZoneCounts.low + filteredZoneCounts.veryLow, color: SE.green, icon: <TrendingDown size={19} />, sub: `${filteredZoneCounts.low} Low · ${filteredZoneCounts.veryLow} VL` },
+                { label: 'Overdue Actions', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={19} />, sub: `>90:${overdueAging.gt90} · 61-90:${overdueAging.d61to90} · 1-30:${overdueAging.d1to30}` },
+                { label: 'Below Target', value: filteredRisks.filter(r => r.belowTarget).length, color: SE.orange, icon: <TrendingDown size={19} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} above target` },
+                { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={19} />, sub: 'Filtered action count' },
               ].map((card, i) => (
                 <KpiTile
                   key={card.label}
