@@ -235,10 +235,3 @@
     grid-template-columns: 1fr !important;
   }
 }
-
-/* Keep selected-risk detail readable: larger KPI chart, wrapping week chips, no inner scroll. */
-@media (max-width: 1180px) {
-  .selected-risk-section {
-    grid-template-columns: 1fr !important;
-  }
-}
