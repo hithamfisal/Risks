@@ -1,13 +1,3 @@
-/**
- * TNOC Risk Management Dashboard
- * Professional enterprise risk analytics dashboard
- * - Theme-aware light/dark Saudi Energy visual system
- * - Compact 100% zoom layout
- * - Collapsible sections
- * - PNG/PDF/Excel exports
- * - Sticky searchable risk register
- */
-
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -1531,11 +1521,25 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           flexShrink: 0,
         }}>
           {/* Logo block — same width as sidebar */}
-          <div style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
+          {/* <div style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
             <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, #0078FF, #00AEEF)', display: 'grid', placeItems: 'center' }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
             </div>
+          </div> */}
+
+          <div style={{ width: 64, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
+            <img
+              src="/assets/se-logo.png"
+              alt="SE Logo"
+              style={{
+                width: 46,
+                height: 38,
+                objectFit: 'contain',
+                display: 'block'
+              }}
+            />
           </div>
+
 
           {/* Title + executive risk posture badge */}
           <div style={{ flex: 1, padding: '0 20px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
