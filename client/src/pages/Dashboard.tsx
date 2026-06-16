@@ -130,8 +130,8 @@ function ProgressGauge({ score, palette }: { score: number; palette: ThemePalett
   const needle = polar(150, 145, 100, angle);
 
   return (
-    <div style={{ minHeight: 232, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', gap: 12 }}>
-      <svg viewBox="0 0 300 205" width="100%" height="184" aria-label="Average risk score gauge" style={{ display: 'block', overflow: 'visible' }}>
+    <div style={{ minHeight: 286, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', gap: 10 }}>
+      <svg viewBox="0 0 300 205" width="100%" height="238" aria-label="Average risk score gauge" style={{ display: 'block', overflow: 'visible' }}>
         {zones.map(z => <path key={z.name} d={arc(z.start, z.end, 62, 108)} fill={z.color} opacity={0.96} stroke={palette.cardSolid} strokeWidth={2} />)}
         {[1, 5, 9, 15, 20, 25].map(t => {
           const tickAngle = 180 - ((t - 1) / 24) * 180;
@@ -151,7 +151,7 @@ function ProgressGauge({ score, palette }: { score: number; palette: ThemePalett
         <text x="150" y="132" textAnchor="middle" fontSize="30" fontWeight="900" fill={ZONE_COLORS[zone]}>{score}</text>
         <text x="150" y="154" textAnchor="middle" fontSize="12" fontWeight="800" fill={palette.text}>{zone}</text>
       </svg>
-      <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '6px 12px', padding: '4px 8px 0', marginTop: 2 }}>
+      <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '5px 10px', padding: '2px 6px 0', marginTop: 0 }}>
         {zones.map(z => (
           <span key={`gauge-legend-${z.name}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: palette.muted, fontSize: 9.5, fontWeight: 800, whiteSpace: 'nowrap' }}>
             <span style={{ width: 8, height: 8, borderRadius: 999, background: z.color, boxShadow: `0 0 0 2px ${palette.cardSolid}` }} />
@@ -380,39 +380,39 @@ function SmallActionButton({ children, onClick, title, palette, disabled = false
 
 function KpiTile({ label, value, isText, color, selectedWeek, index, icon, sub, isPercent = false }: { label: string; value: number | string; isText?: boolean; color: string; selectedWeek: string; index: number; icon?: ReactNode; sub?: string; isPercent?: boolean }) {
   const numeric = Number(value);
-  const ringPct = isText ? 76 : isPercent ? Math.max(18, Math.min(92, Number.isFinite(numeric) ? numeric : 55)) : Math.max(18, Math.min(92, Number.isFinite(numeric) ? numeric : 55));
+  const ringPct = isText ? 78 : isPercent ? Math.max(20, Math.min(94, Number.isFinite(numeric) ? numeric : 55)) : Math.max(20, Math.min(94, Number.isFinite(numeric) ? numeric : 55));
   const displayValue = isText ? value : <><AnimatedNumber animationKey={`${selectedWeek}-${index}`} value={numeric} />{isPercent ? '%' : ''}</>;
   return (
-    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 218 }}>
+    <div className="kpi-tile" style={{ position: 'relative', display: 'grid', placeItems: 'center', minHeight: 252, padding: '6px 0' }}>
       <div
         className="kpi-orb"
         style={{
           '--kpi-color': color,
           '--kpi-ring': `${ringPct}%`,
-          width: 176,
-          height: 176,
+          width: 'clamp(188px, 15vw, 218px)',
+          height: 'clamp(188px, 15vw, 218px)',
           borderRadius: '50%',
           position: 'relative',
           display: 'grid',
           placeItems: 'center',
           background: `conic-gradient(from 210deg, ${color} 0 var(--kpi-ring), rgba(255,255,255,.22) var(--kpi-ring) 100%)`,
-          boxShadow: `0 24px 52px rgba(0,0,0,.24), 0 0 32px ${color}33, inset 0 0 0 1px rgba(255,255,255,.24)`,
-          border: '1px solid rgba(255,255,255,.28)',
+          boxShadow: `0 28px 60px rgba(0,0,0,.28), 0 0 38px ${color}38, inset 0 0 0 1px rgba(255,255,255,.26)`,
+          border: '1px solid rgba(255,255,255,.30)',
         } as CSSProperties}
       >
-        <div style={{ position: 'absolute', inset: 10, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 4px 22px rgba(255,255,255,.18), inset 0 -22px 36px rgba(0,0,0,.26)' }} />
-        <div style={{ position: 'absolute', inset: 22, borderRadius: '50%', background: 'radial-gradient(circle at 35% 20%, rgba(255,255,255,.26), rgba(255,255,255,.07) 38%, rgba(0,0,0,.18) 100%)', border: '1px solid rgba(255,255,255,.18)' }} />
+        <div style={{ position: 'absolute', inset: 11, borderRadius: '50%', background: `linear-gradient(145deg, ${color}, ${SE.navy2})`, boxShadow: 'inset 0 5px 25px rgba(255,255,255,.20), inset 0 -24px 38px rgba(0,0,0,.28)' }} />
+        <div style={{ position: 'absolute', inset: 25, borderRadius: '50%', background: 'radial-gradient(circle at 35% 20%, rgba(255,255,255,.28), rgba(255,255,255,.08) 38%, rgba(0,0,0,.18) 100%)', border: '1px solid rgba(255,255,255,.20)' }} />
         {icon && (
-          <div className="kpi-icon" style={{ position: 'absolute', top: 22, width: 38, height: 38, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,.18)', border: '1px solid rgba(255,255,255,.28)', color: '#fff', boxShadow: '0 8px 18px rgba(0,0,0,.18)' }}>
+          <div className="kpi-icon" style={{ position: 'absolute', top: 24, width: 44, height: 44, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,.19)', border: '1px solid rgba(255,255,255,.30)', color: '#fff', boxShadow: '0 9px 20px rgba(0,0,0,.20)' }}>
             {icon}
           </div>
         )}
-        <div style={{ position: 'relative', width: 132, height: 132, borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '44px 12px 12px' }}>
-          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 20 : 38, lineHeight: 1, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.05em', maxWidth: 112, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
+        <div style={{ position: 'relative', width: '74%', height: '74%', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '52px 14px 14px' }}>
+          <div className="kpi-value" style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 950, fontSize: isText ? 23 : 44, lineHeight: .96, color: isText ? '#FFE08A' : 'white', letterSpacing: '-0.055em', maxWidth: 142, overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(value)}>
             {displayValue}
           </div>
-          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.94)', fontSize: 10, fontWeight: 950, marginTop: 9, textTransform: 'uppercase', letterSpacing: '.055em', lineHeight: 1.15 }}>{label}</div>
-          {sub && <div className="kpi-sub" style={{ color: 'rgba(255,255,255,.70)', fontSize: 8.5, fontWeight: 800, marginTop: 6, lineHeight: 1.2, maxWidth: 106, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
+          <div className="kpi-label" style={{ color: 'rgba(255,255,255,.96)', fontSize: 11, fontWeight: 950, marginTop: 10, textTransform: 'uppercase', letterSpacing: '.052em', lineHeight: 1.15 }}>{label}</div>
+          {sub && <div className="kpi-sub" style={{ color: 'rgba(255,255,255,.74)', fontSize: 9.2, fontWeight: 850, marginTop: 7, lineHeight: 1.2, maxWidth: 132, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
         </div>
       </div>
     </div>
@@ -1015,7 +1015,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           .dashboard-section { break-inside: avoid; box-shadow: none !important; border-radius: 8px !important; }
           .kpi-row { grid-template-columns: repeat(6, 1fr) !important; gap: 5px !important; }
           .kpi-tile { min-height: 126px !important; }
-          .kpi-orb { width: 122px !important; height: 122px !important; }
+          .kpi-orb { width: 132px !important; height: 132px !important; }
           .kpi-value { font-size: 23px !important; }
           .kpi-label { font-size: 7px !important; }
           .chart-row { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px !important; }
@@ -1027,8 +1027,8 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           .selected-risk-section { page-break-before: always; }
           .recharts-wrapper, .recharts-surface { overflow: visible !important; }
         }
-        @media (max-width: 1180px) { .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } .professional-chart-grid, .professional-chart-wide { grid-template-columns: 1fr !important; } }
-        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-orb { width: 148px !important; height: 148px !important; } }
+        @media (max-width: 1320px) { .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } .professional-chart-grid, .professional-chart-wide { grid-template-columns: 1fr !important; } }
+        @media (max-width: 760px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .kpi-tile { min-height: 210px !important; } .kpi-orb { width: 164px !important; height: 164px !important; } }
       `}</style>
 
       {showTrend && weeks?.length > 1 && <TrendModal data={data} weeks={weeks} palette={palette} onClose={() => setShowTrend(false)} />}
@@ -1214,14 +1214,14 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <SectionCard id="kpi-section" title="Executive KPI Overview" palette={palette} bodyRef={kpiRef} compact open={sectionOpen['kpi-section']} onOpenChange={open => setSingleSectionOpen('kpi-section', open)} actions={<><SmallActionButton palette={palette} onClick={() => exportElementAsPNG(kpiRef, 'Risk_KPI_Overview.png', bgForExport)}><ImageDown size={12} />PNG</SmallActionButton></>}>
 
             {/* ── ROW 1: large circular KPI cards with the rectangular-version icons ── */}
-            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 12, alignItems: 'center' }}>
+            <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(180px, 1fr))', gap: 14, alignItems: 'center' }}>
               {[
-                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={21} />, sub: `${selectedWeek}` },
-                { label: 'Active Threats', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={21} />, sub: 'High + Very High' },
-                { label: 'High Severity', value: filteredZoneCounts.veryHigh, color: SE.orange, icon: <Activity size={21} />, sub: 'Very High zone' },
-                { label: 'Overdue', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={21} />, sub: 'Past closing date' },
-                { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={21} />, sub: 'Filtered action count' },
-                { label: 'Overall Risk Health', value: filteredOverallHealth, color: SE.green, icon: <TrendingUp size={21} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} of ${filteredRisks.length} on target`, isPercent: true },
+                { label: 'Total Risks', value: filteredRisks.length, color: SE.blue, icon: <Layers size={24} />, sub: `${selectedWeek}` },
+                { label: 'Active Threats', value: filteredZoneCounts.veryHigh + filteredZoneCounts.high, color: SE.red, icon: <AlertTriangle size={24} />, sub: 'High + Very High' },
+                { label: 'High Severity', value: filteredZoneCounts.veryHigh, color: SE.orange, icon: <Activity size={24} />, sub: 'Very High zone' },
+                { label: 'Overdue', value: professionalSummary.overdue, color: '#eab308', icon: <Target size={24} />, sub: 'Past closing date' },
+                { label: 'Mitigation Actions', value: filteredMitigationActions, color: SE.teal, icon: <BarChart2 size={24} />, sub: 'Filtered action count' },
+                { label: 'Overall Risk Health', value: filteredOverallHealth, color: SE.green, icon: <TrendingUp size={24} />, sub: `${filteredRisks.filter(r => r.aboveTarget).length} of ${filteredRisks.length} on target`, isPercent: true },
               ].map((card, i) => (
                 <KpiTile
                   key={card.label}
