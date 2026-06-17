@@ -15,12 +15,6 @@ import { DashboardData, getScoreColor, getRatingColor, type RiskRow } from '@/li
 import { useTheme } from '@/contexts/ThemeContext';
 import ThemeToggle from '@/components/ThemeToggle';
 
-const HEADER_LEFT_LOGOS = [
-  { src: '/assets/map-logo.png', alt: 'Map', height: 34 },
-  { src: '/assets/se-logo.png', alt: 'Saudi Energy', height: 38 },
-];
-const NASCO_LOGO = { src: '/assets/nasco-logo.png', alt: 'NASCO', height: 44 };
-
 const ZONE_COLORS: Record<string, string> = {
   'Very High': '#C0392B',
   High: '#E67E22',
@@ -1520,26 +1514,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           boxShadow: '0 2px 16px rgba(0,0,0,0.45)',
           flexShrink: 0,
         }}>
-          {/* Logo block — same width as sidebar */}
-          {/* <div style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
+          {/* SVG logo block — only icon shown */}
+          <div style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
             <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, #0078FF, #00AEEF)', display: 'grid', placeItems: 'center' }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
             </div>
-          </div> */}
-
-          <div style={{ width: 64, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
-            <img
-              src="/assets/se-logo.png"
-              alt="SE Logo"
-              style={{
-                width: 46,
-                height: 38,
-                objectFit: 'contain',
-                display: 'block'
-              }}
-            />
           </div>
-
 
           {/* Title + executive risk posture badge */}
           <div style={{ flex: 1, padding: '0 20px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>

@@ -21,9 +21,6 @@ interface UploadPageProps {
   onClearPrevious?: () => void;
 }
 
-const SE_LOGO_URL = '/assets/se-logo.png';
-const NASCO_LOGO_URL = '/assets/nasco-logo.png';
-
 export default function UploadPage({ onDataLoaded, previousUpload, onLoadPrevious, onClearPrevious }: UploadPageProps) {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -123,15 +120,19 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
         <div style={{ position: 'absolute', left: '22%', top: '50%', transform: 'translate(-50%,-50%)', width: 320, height: 160, background: 'radial-gradient(ellipse, rgba(0,144,255,0.22) 0%, transparent 65%)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', right: '22%', top: '50%', transform: 'translate(50%,-50%)', width: 280, height: 140, background: 'radial-gradient(ellipse, rgba(192,57,43,0.18) 0%, transparent 65%)', pointerEvents: 'none' }} />
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
-          <img src={SE_LOGO_URL} alt="Saudi Energy" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: 'linear-gradient(135deg, #0078FF, #00AEEF)', display: 'grid', placeItems: 'center', boxShadow: '0 14px 36px rgba(0,120,255,0.32)' }}>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+          </div>
         </div>
         <div style={{ flex: 1, textAlign: 'center', zIndex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Risk Management Dashboard</div>
           <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Telecom Network Operations Center</div>
         </div>
-        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
-          <img src={NASCO_LOGO_URL} alt="NASCO" style={{ height: 52, maxWidth: 90, objectFit: 'contain' }} />
-        </div>
+        <div style={{ flex: '0 0 auto', width: 52, height: 52, zIndex: 1 }} />
       </div>
 
       {/* Thin control bar below banner */}
