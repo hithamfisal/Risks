@@ -491,7 +491,10 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   // users can rename columns without breaking the upload.
   const COL_ID           = findCol(colMap, '#', 'no', 'risk no', 'risk id', 'id', 'serial', 'index');
   const COL_RISK_TITLE   = findCol(colMap, 'risk title', 'risk name', 'risk item', 'risk');
-  const COL_OWNER        = findCol(colMap, 'owner', 'risk owner', 'responsible owner', 'helper owner');
+  // Prefer the source Risk Owner column for dashboard ownership fields.
+  // Some workbooks also have a generic Owner / Action Owner column; those should
+  // not override Risk Owner in the Residual Risk Analysis owner group column.
+  const COL_OWNER        = findCol(colMap, 'risk owner', 'owner group', 'responsible owner', 'owner', 'helper owner');
   const COL_LIKELIHOOD   = findCol(colMap, 'i-likelihood', 'inherent likelihood', 'likelihood');
   const COL_IMPACT       = findCol(colMap, 'i-impact', 'inherent impact', 'impact');
   const COL_SCORE        = findCol(colMap, 'i-score', 'inherent score', 'risk score', 'score');
