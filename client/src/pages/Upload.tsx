@@ -18,22 +18,48 @@ interface UploadPageProps {
   onDataLoaded: (data: DashboardData, fileName: string) => void;
   previousUpload?: PreviousUploadInfo | null;
   onLoadPrevious?: () => void;
-  onClearPrevious?: () => void;
+  onClearPrevious?: () => void | Promise<void>;
+  onClearSavedDashboardData?: () => void | Promise<void>;
 }
 
-export default function UploadPage({ onDataLoaded, previousUpload, onLoadPrevious, onClearPrevious }: UploadPageProps) {
+export default function UploadPage({ onDataLoaded, previousUpload, onLoadPrevious, onClearPrevious, onClearSavedDashboardData }: UploadPageProps) {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
 
+  const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024;
+  const ALLOWED_FILE_RE = /\.(xlsx|xls|xlsm|csv)$/i;
+
+  function friendlyUploadError(err: unknown): string {
+    const message = err instanceof Error ? err.message : '';
+    if (message.startsWith('UPLOAD_VALIDATION:')) {
+      return message.replace('UPLOAD_VALIDATION:', '').trim();
+    }
+    if (import.meta.env.DEV) {
+      console.error(err);
+    }
+    return 'The uploaded file could not be processed. Please check the file format and required columns.';
+  }
+
   async function handleFile(file: File) {
-    if (!file.name.match(/\.(xlsx|xls|xlsm)$/i)) {
-      setError('Please upload an Excel file (.xlsx, .xls, or .xlsm)');
+    setNotice('');
+    if (!ALLOWED_FILE_RE.test(file.name)) {
+      setError('Invalid file type. Please upload .xlsx, .xls, .xlsm, or .csv only.');
       return;
     }
+    if (file.size === 0) {
+      setError('The selected file is empty. Please upload a valid workbook.');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      setError('The selected file is too large. Please upload a file smaller than 25 MB.');
+      return;
+    }
+
     setError('');
     setLoading(true);
     try {
@@ -41,7 +67,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
       const data = parseExcel(buffer);
       onDataLoaded(data, file.name);
     } catch (e) {
-      setError('Could not read the file. Please check it is a valid Excel workbook.');
+      setError(friendlyUploadError(e));
     } finally {
       setLoading(false);
     }
@@ -76,9 +102,21 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
       const data = parseExcel(buffer);
       onDataLoaded(data, 'sample_data.xlsx');
     } catch (e) {
-      setError('Could not read public/sample_data.xlsx. Replace that file with your sample workbook and keep it as a valid Excel file.');
+      setError(friendlyUploadError(e));
     } finally {
       setLoading(false);
+    }
+  }
+
+
+  async function clearSavedData() {
+    setError('');
+    setNotice('');
+    try {
+      await onClearSavedDashboardData?.();
+      setNotice('Saved dashboard data cleared successfully.');
+    } catch {
+      setError('Saved dashboard data could not be cleared. Please try again.');
     }
   }
 
@@ -174,7 +212,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
                 Upload Your Risk Register
               </h2>
               <p className="text-sm mt-1" style={{ color: isDark ? '#CBD5E1' : '#6B7280' }}>
-                Upload an Excel file (.xlsx / .xls / .xlsm) to generate your dashboard automatically.
+                Upload an Excel or CSV file (.xlsx / .xls / .xlsm / .csv) to generate your dashboard automatically.
               </p>
             </div>
 
@@ -237,15 +275,35 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
               <p className="font-semibold text-sm" style={{ color: isDark ? '#E2E8F0' : '#374151', fontFamily: 'DM Sans, sans-serif', margin: 0 }}>
                 {dragging ? 'Drop your file here' : 'Drag & drop your Excel file here'}
               </p>
-              <p className="text-xs" style={{ color: isDark ? '#94A3B8' : '#9CA3AF', marginTop: 2 }}>or click to browse · .xlsx · .xls · .xlsm</p>
+              <p className="text-xs" style={{ color: isDark ? '#94A3B8' : '#9CA3AF', marginTop: 2 }}>or click to browse · .xlsx · .xls · .xlsm · .csv</p>
               <input
                 ref={inputRef}
                 type="file"
-                accept=".xlsx,.xls,.xlsm"
+                accept=".xlsx,.xls,.xlsm,.csv"
                 className="hidden"
                 onChange={onInputChange}
               />
             </div>
+
+            <p className="text-xs mt-3 text-center" style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+              Uploaded files are processed in your browser. No files are sent to a server by this dashboard.
+            </p>
+
+            <button
+              type="button"
+              onClick={clearSavedData}
+              className="w-full mt-3 flex items-center justify-center gap-2 py-2 px-4 rounded-lg border font-semibold text-xs transition-all"
+              style={{ borderColor: isDark ? 'rgba(248,113,113,.42)' : 'rgba(180,35,24,.28)', color: isDark ? '#FCA5A5' : '#B42318', background: isDark ? 'rgba(127,29,29,.16)' : 'rgba(254,242,242,.72)', fontFamily: 'DM Sans, sans-serif' }}
+            >
+              <Trash2 size={14} />
+              Clear Saved Dashboard Data
+            </button>
+
+            {notice && (
+              <div className="mt-4 flex items-center justify-center gap-2 p-3 rounded-lg text-sm" style={{ background: isDark ? 'rgba(22,101,52,.18)' : '#ECFDF3', color: isDark ? '#86EFAC' : '#027A48' }}>
+                {notice}
+              </div>
+            )}
 
             {/* Error */}
             {error && (

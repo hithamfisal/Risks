@@ -20,6 +20,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(projectRoot, "dist"),
     emptyOutDir: true,
+    sourcemap: false,
   },
   server: {
     port: 3000,

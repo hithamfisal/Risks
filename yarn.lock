@@ -178,22 +178,6 @@
   resolved "https://registry.npmjs.org/@braintree/sanitize-url/-/sanitize-url-7.1.2.tgz"
   integrity sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==
 
-"@builder.io/jsx-loc-internals@0.0.1":
-  version "0.0.1"
-  resolved "https://registry.npmjs.org/@builder.io/jsx-loc-internals/-/jsx-loc-internals-0.0.1.tgz"
-  integrity sha512-cSADapVCi07DDhcuDmcAVItqSVmji7DNyD3xxYTHyNCwhWMNnTpZjyvDIWwYFJLleyDCJ9VUtbaXtUjjqBiRqw==
-  dependencies:
-    "@babel/parser" "^7.24.0"
-    estree-walker "2.0.2"
-    magic-string "^0.30.8"
-
-"@builder.io/vite-plugin-jsx-loc@^0.1.1":
-  version "0.1.1"
-  resolved "https://registry.npmjs.org/@builder.io/vite-plugin-jsx-loc/-/vite-plugin-jsx-loc-0.1.1.tgz"
-  integrity sha512-iAHFkaLBDJBC+EkGO1hF7hnIW2+oKKYVOl8NFAQH//3xeNEzvGdS9tOALRPR+JjR/M5NLyj+FG0VV7WFb1aJmw==
-  dependencies:
-    "@builder.io/jsx-loc-internals" "0.0.1"
-
 "@chevrotain/types@~11.1.1":
   version "11.1.2"
   resolved "https://registry.npmjs.org/@chevrotain/types/-/types-11.1.2.tgz"

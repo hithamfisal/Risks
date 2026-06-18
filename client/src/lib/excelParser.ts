@@ -382,7 +382,7 @@ function locateRiskSheet(wb: XLSX.WorkBook): SheetMatch {
     if (rows.length >= 2) return { sheetName, rows, headerRowIdx: 0, score: 0 };
   }
 
-  throw new Error('Workbook contains no readable sheets.');
+  throw new Error('UPLOAD_VALIDATION: Workbook contains no readable sheets.');
 }
 
 // ── Period column detection ──────────────────────────────────────────────────
@@ -479,7 +479,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const rows = located.rows;
   const headerRowIdx = located.headerRowIdx;
 
-  if (rows.length < 2) throw new Error('Sheet appears to be empty.');
+  if (rows.length < 2) throw new Error('UPLOAD_VALIDATION: The selected sheet appears to be empty.');
 
   const headerRow = rows[headerRowIdx] as unknown[];
   const dataStartRow = headerRowIdx + 1;
@@ -551,6 +551,13 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   // after the KRI-name block.
   let COL_KRI_TARGET = findCol(colMap, 'target kri', 'kri target', 'target key risk indicator');
   let COL_KRI_ACTUAL = findCol(colMap, 'actual', 'kri actual', 'actual kri');
+
+  const missingRequiredColumns: string[] = [];
+  if (COL_RISK_TITLE < 0) missingRequiredColumns.push('Risk Title');
+  if (missingRequiredColumns.length > 0) {
+    throw new Error(`UPLOAD_VALIDATION: Missing required columns: ${missingRequiredColumns.join(', ')}.`);
+  }
+
   for (let i = 0; i < headerRow.length; i++) {
     const h = normalizeHeaderName(headerRow[i]);
     if ((h === 'target' || h === 'target kri' || h === 'kri target') &&
