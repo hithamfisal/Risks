@@ -265,47 +265,70 @@ function quarterTrendMonthLabels(periodLabels: string[], orderedWeeks: { label: 
     .map(w => w.label);
 }
 
-function getDateValue(value: string): number | null {
-  if (!value) return null;
+function getDateValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
+
+  if (typeof value === 'number' && value > 36526 && value < 50000) {
+    const d = new Date(Math.round((value - 25569) * 86400 * 1000));
+    if (!Number.isNaN(d.getTime())) return d.getTime();
+  }
+
+  const text = String(value).trim();
+  if (!text || text.startsWith('#')) return null;
 
   // 1. Quarter strings: 2025 Q1, Q1 2025, 2025-Q2, q3/2026, etc.
   //    Q1 → Mar 31 | Q2 → Jun 30 | Q3 → Sep 30 | Q4 → Dec 31
-  const quarterPeriod = parseQuarterPeriod(value);
+  const quarterPeriod = parseQuarterPeriod(text);
   if (quarterPeriod) return quarterPeriod.endMs;
 
-  // 2. Standard ISO / browser-parseable strings (e.g. "2026-06-01", "June 2026", "01 Jan 2026")
-  const parsed = Date.parse(value);
-  if (!Number.isNaN(parsed)) return parsed;
-
-  // 3. dd/mm/yyyy or dd-mm-yyyy (European format)
-  const dmyMatch = value.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  // 2. dd/mm/yyyy or dd-mm-yyyy. This MUST run before Date.parse because
+  // browsers may read 01/05/2026 as Jan 5 instead of 1 May.
+  const dmyMatch = text.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
   if (dmyMatch) {
     const [, d, m, y] = dmyMatch;
     const year = y.length === 2 ? Number(`20${y}`) : Number(y);
-    return new Date(year, Number(m) - 1, Number(d)).getTime();
+    const day = Number(d);
+    const month = Number(m) - 1;
+    const parsedDate = new Date(year, month, day);
+    if (!Number.isNaN(parsedDate.getTime()) && parsedDate.getFullYear() === year && parsedDate.getMonth() === month && parsedDate.getDate() === day) {
+      return parsedDate.getTime();
+    }
   }
 
-  // 4. Month-name formats: "Jan 2026", "January 2026", "2026 Jan"
+  // 3. ISO yyyy-mm-dd / yyyy/mm/dd.
+  const isoMatch = text.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]) - 1;
+    const day = Number(isoMatch[3]);
+    const parsedDate = new Date(year, month, day);
+    if (!Number.isNaN(parsedDate.getTime())) return parsedDate.getTime();
+  }
+
+  // 4. Month-name formats: "Jan 2026", "January 2026", "2026 Jan", "Mar-2026"
   const monthNames: Record<string, number> = {
     jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11,
     january: 0, february: 1, march: 2, april: 3, june: 5,
     july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
   };
-  const monthYearMatch = value.match(/([A-Za-z]+)[\s,\-]+(\d{4})|(\d{4})[\s,\-]+([A-Za-z]+)/);
+  const monthYearMatch = text.match(/([A-Za-z]+)[\s,\-]+(\d{4})|(\d{4})[\s,\-]+([A-Za-z]+)/);
   if (monthYearMatch) {
     const monthStr = (monthYearMatch[1] || monthYearMatch[4] || '').toLowerCase();
     const yearStr  = monthYearMatch[2] || monthYearMatch[3];
     const month = monthNames[monthStr];
     if (month !== undefined && yearStr) {
-      // Use last day of that month
       const yr = Number(yearStr);
       const lastDay = new Date(yr, month + 1, 0).getDate();
       return new Date(yr, month, lastDay).getTime();
     }
   }
 
-  return null;
+  // 5. Last-resort browser parse for long date strings.
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function normalise(text: string) {
