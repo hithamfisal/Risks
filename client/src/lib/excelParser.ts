@@ -191,94 +191,6 @@ function normalizeQuarterValue(v: unknown): string {
   return `Q${quarter} ${year}`;
 }
 
-function quarterEndMs(value: unknown): number | null {
-  const text = normalizeQuarterValue(value);
-  const match = text.match(/^Q([1-4])\s+(\d{4})$/i);
-  if (!match) return null;
-  const quarter = Number(match[1]);
-  const year = Number(match[2]);
-  const quarterEnd: [number, number][] = [
-    [2, 31],   // Q1 -> 31 Mar
-    [5, 30],   // Q2 -> 30 Jun
-    [8, 30],   // Q3 -> 30 Sep
-    [11, 31],  // Q4 -> 31 Dec
-  ];
-  const [month, day] = quarterEnd[quarter - 1];
-  return new Date(year, month, day).getTime();
-}
-
-function parseDateMs(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null;
-
-  const quarter = quarterEndMs(v);
-  if (quarter !== null) return quarter;
-
-  if (v instanceof Date && !isNaN(v.getTime())) return v.getTime();
-
-  // Excel date serials. Keep this before string parsing because xlsx may return
-  // numbers for real date cells when cellDates is not preserved.
-  if (typeof v === 'number' && v > 36526 && v < 50000) {
-    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-    if (!isNaN(d.getTime())) return d.getTime();
-  }
-
-  const text = safeStr(v);
-  if (!text || text.startsWith('#')) return null;
-
-  // dd/mm/yyyy or dd-mm-yyyy. This MUST run before Date.parse because browsers
-  // may read 01/05/2026 as Jan 5 instead of 1 May.
-  const dmy = text.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
-  if (dmy) {
-    const day = Number(dmy[1]);
-    const month = Number(dmy[2]) - 1;
-    const year = dmy[3].length === 2 ? Number(`20${dmy[3]}`) : Number(dmy[3]);
-    const d = new Date(year, month, day);
-    if (!isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() === month && d.getDate() === day) return d.getTime();
-  }
-
-  // ISO yyyy-mm-dd is safe to parse manually.
-  const iso = text.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})$/);
-  if (iso) {
-    const year = Number(iso[1]);
-    const month = Number(iso[2]) - 1;
-    const day = Number(iso[3]);
-    const d = new Date(year, month, day);
-    if (!isNaN(d.getTime())) return d.getTime();
-  }
-
-  const parsed = Date.parse(text);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function formatDateValue(v: unknown): string {
-  const quarter = normalizeQuarterValue(v);
-  if (/^Q[1-4]\s+\d{4}$/i.test(quarter)) return quarter;
-
-  const ms = parseDateMs(v);
-  if (ms === null) return safeStr(v);
-  const d = new Date(ms);
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}/${d.getFullYear()}`;
-}
-
-function chooseLatestDateValue(current: string, candidate: string): string {
-  if (!candidate) return current;
-  if (!current) return candidate;
-  const currentMs = parseDateMs(current);
-  const candidateMs = parseDateMs(candidate);
-  if (currentMs === null || candidateMs === null) return current;
-  return candidateMs >= currentMs ? candidate : current;
-}
-
-function normalizeProgressValue(v: unknown): number | null {
-  if (v === null || v === undefined || v === '' || String(v).startsWith('#')) return null;
-  const n = safeNum(v);
-  if (!Number.isFinite(n)) return null;
-  // Accept either decimals (0.35) or percentages (35). Store as decimal.
-  return n > 1 ? n / 100 : n;
-}
-
 function quarterOptionSortKey(value: string): number {
   const text = normalizeQuarterValue(value);
   const match = text.match(/^Q([1-4])\s+(\d{4})$/i);
@@ -486,43 +398,9 @@ function locateRiskSheet(wb: XLSX.WorkBook): SheetMatch {
  * "control", "description", "indicator", "measure", "unit" — these are
  * named columns that happen to contain month words.
  */
-const MONTH_LOOKUP: Record<string, { short: string; month: number }> = {
-  jan: { short: 'Jan', month: 0 }, january: { short: 'Jan', month: 0 },
-  feb: { short: 'Feb', month: 1 }, february: { short: 'Feb', month: 1 },
-  mar: { short: 'Mar', month: 2 }, march: { short: 'Mar', month: 2 },
-  apr: { short: 'Apr', month: 3 }, april: { short: 'Apr', month: 3 },
-  may: { short: 'May', month: 4 },
-  jun: { short: 'Jun', month: 5 }, june: { short: 'Jun', month: 5 },
-  jul: { short: 'Jul', month: 6 }, july: { short: 'Jul', month: 6 },
-  aug: { short: 'Aug', month: 7 }, august: { short: 'Aug', month: 7 },
-  sep: { short: 'Sep', month: 8 }, sept: { short: 'Sep', month: 8 }, september: { short: 'Sep', month: 8 },
-  oct: { short: 'Oct', month: 9 }, october: { short: 'Oct', month: 9 },
-  nov: { short: 'Nov', month: 10 }, november: { short: 'Nov', month: 10 },
-  dec: { short: 'Dec', month: 11 }, december: { short: 'Dec', month: 11 },
-};
+const PERIOD_TEXT_RE = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|(\bw\d{1,2}\b)|(\bweek\s*\d{1,2}\b)/i;
 
-const MONTH_TEXT_RE = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
-const WEEK_TEXT_RE = /(\bw\d{1,2}\b)|(\bweek\s*\d{1,2}\b)/i;
-
-// Columns with these words are usually not progress periods. We intentionally do
-// NOT exclude "progress" or "status" because some source files use headers such
-// as "Mar Progress status %" and "Apr Progress status %" for monthly progress.
-const PERIOD_EXCLUDE_RE = /residual|likelihood|impact|score|weight|action|comment|control|description|indicator|measure|unit|kri|sector|category|department|business|owner|rating|date|closing|div|dept/i;
-
-function inferDefaultProgressYear(headerRow: unknown[]): number | null {
-  const years: number[] = [];
-  for (const h of headerRow) {
-    const text = safeStr(h);
-    const matches = text.match(/20\d{2}/g);
-    if (matches) years.push(...matches.map(Number).filter(y => y >= 2020 && y <= 2035));
-  }
-  if (!years.length) return null;
-  // Use the most common year. If tied, use the latest year so "Mar Progress" in
-  // a 2026 residual/action file maps to Mar-2026.
-  const counts = new Map<number, number>();
-  years.forEach(y => counts.set(y, (counts.get(y) ?? 0) + 1));
-  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
-}
+const PERIOD_EXCLUDE_RE = /residual|likelihood|impact|score|weight|action|status|target|comment|control|description|indicator|measure|unit|kri|sector|category|department|business|owner|rating|date|closing|div|dept/i;
 
 /**
  * Convert an Excel date serial (number) or JS Date to a "Mon-YYYY" label.
@@ -530,67 +408,54 @@ function inferDefaultProgressYear(headerRow: unknown[]): number | null {
  * xlsx with cellDates:true returns them as JS Date objects.
  */
 function excelDateToLabel(v: unknown): string | null {
-  const ms = parseDateMs(v);
-  if (ms === null) return null;
-  const d = new Date(ms);
-  if (d.getFullYear() < 2020 || d.getFullYear() > 2035) return null;
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${months[d.getMonth()]}-${d.getFullYear()}`;
-}
-
-function textPeriodToLabel(value: string, defaultYear: number | null): string | null {
-  const text = value.trim();
-  if (!text || text.length > 80) return null;
-
-  const monthMatch = text.match(MONTH_TEXT_RE);
-  if (monthMatch) {
-    // Allow regular month columns (Jan-2026) and source progress columns
-    // ("Mar Progress status %"), but still block residual score/likelihood etc.
-    const isProgressColumn = /progress/i.test(text);
-    if (!isProgressColumn && PERIOD_EXCLUDE_RE.test(text)) return null;
-    if (isProgressColumn && /residual|likelihood|impact|score|weight|action|comment|control|indicator|measure|unit|kri/i.test(text)) return null;
-
-    const info = MONTH_LOOKUP[monthMatch[1].toLowerCase()];
-    if (!info) return null;
-    const yearMatch = text.match(/20\d{2}/);
-    const year = yearMatch ? Number(yearMatch[0]) : defaultYear;
-    if (!year) return null;
-    return `${info.short}-${year}`;
+  // JS Date (cellDates:true)
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${months[v.getMonth()]}-${v.getFullYear()}`;
   }
-
-  if (WEEK_TEXT_RE.test(text) && !PERIOD_EXCLUDE_RE.test(text)) return text;
-
-  const numericMonth = text.match(/^(\d{1,2})[\/-](20\d{2})$|^(20\d{2})[\/-](\d{1,2})$/);
-  if (numericMonth) {
-    const month = Number(numericMonth[1] || numericMonth[4]) - 1;
-    const year = Number(numericMonth[2] || numericMonth[3]);
-    if (month >= 0 && month <= 11) {
+  // Number — could be an Excel date serial (cellDates:false)
+  // Excel date serials for year 2000+ are > 36526; typical risk register years 2024-2030
+  if (typeof v === 'number' && v > 36526 && v < 50000) {
+    // Convert Excel serial to JS Date (Excel epoch = Jan 0 1900)
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    if (!isNaN(d.getTime()) && d.getFullYear() >= 2020 && d.getFullYear() <= 2035) {
       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      return `${months[month]}-${year}`;
+      return `${months[d.getMonth()]}-${d.getFullYear()}`;
     }
   }
-
   return null;
 }
 
 /**
  * Detect all period (month/week) columns from the header row.
- * Supports normal month columns (Jan-2026) and action progress columns such as
- * "Mar Progress status %" / "Apr Progress status %".
+ * Returns WeekData[] sorted by column index (chronological order in sheet).
+ *
+ * Detection rules (in priority):
+ *   1. Header is a JS Date object → convert to "Mon-YYYY" label
+ *   2. Header is a number in Excel date serial range → convert to "Mon-YYYY" label
+ *   3. Header is a string matching PERIOD_TEXT_RE and NOT matching PERIOD_EXCLUDE_RE
  */
 function detectPeriodColumns(headerRow: unknown[]): WeekData[] {
   const periods: WeekData[] = [];
   const seenLabels = new Set<string>();
-  const defaultYear = inferDefaultProgressYear(headerRow);
 
   for (let i = 0; i < headerRow.length; i++) {
     const v = headerRow[i];
     if (v === null || v === undefined) continue;
 
-    let label: string | null = excelDateToLabel(v);
+    let label: string | null = null;
 
+    // Rule 1 & 2: date value
+    label = excelDateToLabel(v);
+
+    // Rule 3: text string
     if (label === null && typeof v === 'string') {
-      label = textPeriodToLabel(v, defaultYear);
+      const s = v.trim();
+      if (s.length > 0 && s.length < 40 &&
+          PERIOD_TEXT_RE.test(s) &&
+          !PERIOD_EXCLUDE_RE.test(s)) {
+        label = s;
+      }
     }
 
     if (label && !seenLabels.has(label)) {
@@ -635,7 +500,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const COL_SCORE        = findCol(colMap, 'i-score', 'inherent score', 'risk score', 'score');
   const COL_RATING       = findCol(colMap, 'rating', 'risk rating', 'inherent rating');
   const COL_ACTION       = findCol(colMap, 'action', 'mitigation action', 'mitigation', 'action description');
-  const COL_ACTION_WEIGHT = findCol(colMap, 'action weight', 'action wieght', 'action wt', 'weight', 'weighting');
+  const COL_ACTION_WEIGHT = findCol(colMap, 'action weight', 'weight', 'weighting');
   const COL_IDENTIFICATION_DATE = (() => {
     const direct = findCol(
       colMap,
@@ -670,7 +535,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
     }
     return -1;
   })();
-  const COL_CLOSING_DATE = findCol(colMap, 'closing date', 'close date', 'target close', 'target close date', 'due date', 'date');
+  const COL_CLOSING_DATE = findCol(colMap, 'closing date', 'target close', 'target close date', 'due date');
   const COL_PROGRESS_STATUS = findCol(colMap, 'progress status', 'status', 'action status');
   const COL_T_SCORE          = findCol(colMap, 't-score', 'target score', 'target risk score', 'tscore');
   const COL_CATEGORY         = findCol(colMap, 'category', 'risk category');
@@ -766,10 +631,6 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const kriUnitMap: Record<string, string> = {};
   const kriTargetMap: Record<string, number> = {};
   const kriActualMap: Record<string, number> = {};
-  const progressWeightedSumMap: Record<string, Record<string, number>> = {};
-  const progressWeightTotalMap: Record<string, Record<string, number>> = {};
-  const progressUnweightedSumMap: Record<string, Record<string, number>> = {};
-  const progressUnweightedCountMap: Record<string, Record<string, number>> = {};
 
   const sourceIdentificationValues = new Set<string>();
   const sourceRatingValues = new Set<string>();
@@ -797,25 +658,22 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
     if (isRiskTitleRow) {
       currentRisk = titleVal;
       weekProgressMap[currentRisk] = {};
-      progressWeightedSumMap[currentRisk] = {};
-      progressWeightTotalMap[currentRisk] = {};
-      progressUnweightedSumMap[currentRisk] = {};
-      progressUnweightedCountMap[currentRisk] = {};
 
       // Read progress from the title row's period columns
       for (const w of weeks) {
         const val = row[w.colIndex];
-        const progressValue = normalizeProgressValue(val);
-        weekProgressMap[currentRisk][w.label] = progressValue ?? 0;
+        weekProgressMap[currentRisk][w.label] =
+          (val !== null && val !== undefined && !String(val).startsWith('#'))
+            ? safeNum(val)
+            : 0;
       }
 
       // Store metadata
       const ownerValue = COL_OWNER >= 0 ? safeStr(row[COL_OWNER]) : '';
       const ratingValue = COL_RATING >= 0 ? (safeStr(row[COL_RATING]) || deriveRating(safeNum(row[COL_SCORE]))) : deriveRating(safeNum(row[COL_SCORE]));
       const identificationValue = COL_IDENTIFICATION_DATE >= 0 ? normalizeQuarterValue(row[COL_IDENTIFICATION_DATE]) : '';
-      const closingValue = COL_CLOSING_DATE >= 0 ? formatDateValue(row[COL_CLOSING_DATE]) : '';
-      const rawProgressStatusValue = COL_PROGRESS_STATUS >= 0 ? safeStr(row[COL_PROGRESS_STATUS]) : '';
-      const progressStatusValue = rawProgressStatusValue.startsWith('#') ? '' : rawProgressStatusValue;
+      const closingValue = COL_CLOSING_DATE >= 0 ? safeStr(row[COL_CLOSING_DATE]) : '';
+      const progressStatusValue = COL_PROGRESS_STATUS >= 0 ? safeStr(row[COL_PROGRESS_STATUS]) : '';
       const categoryValue = COL_CATEGORY >= 0 ? safeStr(row[COL_CATEGORY]) : '';
       const riskTypeValue = COL_RISK_TYPE >= 0 ? safeStr(row[COL_RISK_TYPE]) : '';
 
@@ -857,57 +715,6 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       if (action) {
         if (!mitigationMap[currentRisk]) mitigationMap[currentRisk] = [];
         if (!mitigationMap[currentRisk].includes(action)) mitigationMap[currentRisk].push(action);
-      }
-    }
-
-    // Read all action-row closing dates and status values. This is important for
-    // workbooks where the first row is the risk and following rows are related
-    // actions with their own closing dates.
-    if (COL_CLOSING_DATE >= 0) {
-      const closingCandidate = formatDateValue(row[COL_CLOSING_DATE]);
-      if (closingCandidate) {
-        sourceClosingDateValues.add(closingCandidate);
-        closingDateMap[currentRisk] = chooseLatestDateValue(closingDateMap[currentRisk] || '', closingCandidate);
-      }
-    }
-
-    if (COL_PROGRESS_STATUS >= 0) {
-      const statusCandidate = safeStr(row[COL_PROGRESS_STATUS]);
-      if (statusCandidate && !statusCandidate.startsWith('#')) {
-        sourceProgressStatusValues.add(statusCandidate);
-        if (!progressStatusMap[currentRisk] || isRiskTitleRow) progressStatusMap[currentRisk] = statusCandidate;
-      }
-    }
-
-    // Aggregate progress across action rows using Action Weight when available.
-    // If no weights are available, use the average of non-empty progress cells.
-    const actionWeight = COL_ACTION_WEIGHT >= 0 ? safeNum(row[COL_ACTION_WEIGHT]) : 0;
-    for (const w of weeks) {
-      const progressValue = normalizeProgressValue(row[w.colIndex]);
-      if (progressValue === null) continue;
-
-      if (actionWeight > 0) {
-        progressWeightedSumMap[currentRisk][w.label] = (progressWeightedSumMap[currentRisk][w.label] ?? 0) + (actionWeight * progressValue);
-        progressWeightTotalMap[currentRisk][w.label] = (progressWeightTotalMap[currentRisk][w.label] ?? 0) + actionWeight;
-      } else if (!isRiskTitleRow) {
-        progressUnweightedSumMap[currentRisk][w.label] = (progressUnweightedSumMap[currentRisk][w.label] ?? 0) + progressValue;
-        progressUnweightedCountMap[currentRisk][w.label] = (progressUnweightedCountMap[currentRisk][w.label] ?? 0) + 1;
-      }
-    }
-  }
-
-  // Override title-row period values with action-level weighted progress where
-  // available. This makes charts work for both layouts:
-  // 1) one aggregated progress row per risk, and
-  // 2) one risk row followed by several weighted action rows.
-  for (const title of Object.keys(weekProgressMap)) {
-    for (const w of weeks) {
-      const weightTotal = progressWeightTotalMap[title]?.[w.label] ?? 0;
-      if (weightTotal > 0) {
-        weekProgressMap[title][w.label] = (progressWeightedSumMap[title]?.[w.label] ?? 0) / weightTotal;
-      } else {
-        const count = progressUnweightedCountMap[title]?.[w.label] ?? 0;
-        if (count > 0) weekProgressMap[title][w.label] = (progressUnweightedSumMap[title]?.[w.label] ?? 0) / count;
       }
     }
   }
@@ -1012,8 +819,19 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
   const currentDate = new Date();
   function isClosingDateOverdue(cd: string, pct: number): boolean {
     if (pct >= 100) return false; // completed
-    const due = parseDateMs(cd);
-    return due !== null && due < currentDate.getTime();
+    if (!cd) return false;
+    const qMatch = cd.match(/Q(\d)\s*(\d{4})/);
+    if (qMatch) {
+      const q = parseInt(qMatch[1]);
+      const y = parseInt(qMatch[2]);
+      const qEndMonth = q * 3; // Q1→3, Q2→6, Q3→9, Q4→12
+      const qEndDate = new Date(y, qEndMonth, 1); // first day after quarter ends
+      return qEndDate <= currentDate;
+    }
+    // Try parsing as a real date
+    const d = new Date(cd);
+    if (!isNaN(d.getTime())) return d < currentDate;
+    return false;
   }
 
   // Mark isOverdue on each risk
@@ -1120,14 +938,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       ratings: Array.from(sourceRatingValues),
       owners: Array.from(sourceOwnerValues).sort(),
       progressStatuses: Array.from(sourceProgressStatusValues).sort(),
-      closingDates: Array.from(sourceClosingDateValues).sort((a, b) => {
-        const da = parseDateMs(a);
-        const db = parseDateMs(b);
-        if (da !== null && db !== null) return da - db;
-        if (da !== null) return -1;
-        if (db !== null) return 1;
-        return a.localeCompare(b);
-      }),
+      closingDates: Array.from(sourceClosingDateValues).sort(),
       categories: Array.from(sourceCategoryValues).sort(),
       riskTypes: Array.from(sourceRiskTypeValues).sort(),
     },
