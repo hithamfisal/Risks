@@ -21,8 +21,8 @@ export default function LoginPage() {
   const isDark = theme === 'dark';
   const { login, loading, error } = useAuth();
   const [, setLocation] = useLocation();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('Admin@12345');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState('');
 
   async function handleSubmit(event: FormEvent) {
@@ -97,11 +97,6 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <div style={{ marginTop: 18, display: 'grid', gap: 8, fontSize: 12, color: isDark ? '#A8C3DD' : '#64748B', lineHeight: 1.7 }}>
-          <div><b>System Admin:</b> admin / Admin@12345</div>
-          <div><b>Risk Admin:</b> riskadmin / RiskAdmin@12345</div>
-          <div><b>Viewer / Customer:</b> viewer / Viewer@12345</div>
-        </div>
       </form>
     </div>
   );

@@ -6,6 +6,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const http = require('http');
+const crypto = require('crypto');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
@@ -34,9 +35,11 @@ const ENV = {
   RISK_COOKIE_NAME: process.env.RISK_COOKIE_NAME || 'risk_session',
   RISK_COOKIE_DOMAIN: process.env.RISK_COOKIE_DOMAIN || '',
   RISK_COOKIE_SECURE: String(process.env.RISK_COOKIE_SECURE || '').toLowerCase() === 'true',
-  API_PORT: Number(process.env.API_PORT || process.env.PORT || 4000),
+  API_PORT: Number(process.env.PORT || process.env.API_PORT || 4000),
   NODE_ENV: process.env.NODE_ENV || 'development',
-  RISK_CORS_ORIGINS: (process.env.RISK_CORS_ORIGINS || 'https://risks-dashboard.com,https://www.risks-dashboard.com,http://127.0.0.1:5173,http://localhost:5173')
+  RISK_CORS_ORIGINS: (process.env.RISK_CORS_ORIGINS || (process.env.NODE_ENV === 'production'
+    ? 'https://risks-dashboard.com,https://www.risks-dashboard.com'
+    : 'https://risks-dashboard.com,https://www.risks-dashboard.com,http://127.0.0.1:5173,http://localhost:5173'))
     .split(',')
     .map(v => v.trim())
     .filter(Boolean),
@@ -84,6 +87,9 @@ function requireEnv() {
     throw new Error(`Missing required Risk API environment variable(s): ${missing.join(', ')}`);
   }
   if (!process.env.RISK_SESSION_SECRET || ENV.RISK_SESSION_SECRET === 'dev-only-change-this-risk-secret') {
+    if (ENV.NODE_ENV === 'production') {
+      throw new Error('RISK_SESSION_SECRET is required in production. Set a long random secret before starting the API.');
+    }
     console.warn('WARNING: RISK_SESSION_SECRET is not configured. Set a long random secret before production.');
   }
 }
@@ -129,10 +135,21 @@ async function seedDefaultUsers() {
   const db = getPool();
   const [rows] = await db.query('SELECT COUNT(*) AS count FROM risk_users');
   if (Number(rows[0].count) > 0) return;
+  let seedPassword = String(process.env.RISK_SEED_ADMIN_PASSWORD || '');
+  if (!seedPassword && ENV.NODE_ENV !== 'production') {
+    seedPassword = crypto.randomBytes(18).toString('base64url');
+    console.warn(`Temporary development admin password for ${process.env.RISK_SEED_ADMIN_USERNAME || 'admin'}: ${seedPassword}`);
+  }
+  if (seedPassword.length < 12) {
+    throw new Error('RISK_SEED_ADMIN_PASSWORD must be set to at least 12 characters before seeding the first admin user.');
+  }
   const defaults = [
-    { username: 'admin', display_name: 'System Admin', role_name: 'system_admin', password: 'Admin@12345' },
-    { username: 'riskadmin', display_name: 'Risk Admin', role_name: 'risk_admin', password: 'RiskAdmin@12345' },
-    { username: 'viewer', display_name: 'Viewer / Customer', role_name: 'viewer', password: 'Viewer@12345' },
+    {
+      username: process.env.RISK_SEED_ADMIN_USERNAME || 'admin',
+      display_name: process.env.RISK_SEED_ADMIN_DISPLAY_NAME || 'System Admin',
+      role_name: 'system_admin',
+      password: seedPassword,
+    },
   ];
   for (const user of defaults) {
     const hash = await bcrypt.hash(user.password, 12);
@@ -290,7 +307,7 @@ async function loginHandler(req, res) {
   const token = signSession(user);
   res.cookie(ENV.RISK_COOKIE_NAME, token, cookieOptions());
   await audit(req, 'auth.login', {}, user);
-  return res.json({ ok: true, token, user, tenant: await getTenantIdentity() });
+  return res.json({ ok: true, user, tenant: await getTenantIdentity() });
 }
 
 async function logoutHandler(req, res) {

@@ -14,6 +14,21 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
+const DASHBOARD_STORAGE_PREFIXES = ['risks-dashboard:', 'risk-dashboard:'];
+
+function clearBrowserDashboardData() {
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      for (const key of Object.keys(storage)) {
+        if (DASHBOARD_STORAGE_PREFIXES.some(prefix => key.startsWith(prefix))) {
+          storage.removeItem(key);
+        }
+      }
+    } catch {
+      // Ignore storage access errors while logging out.
+    }
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -65,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Clear local state even if the server cookie was already expired.
     } finally {
+      clearBrowserDashboardData();
       setUser(null);
       setTenant(null);
       setLoading(false);

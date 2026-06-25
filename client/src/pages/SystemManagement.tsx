@@ -105,6 +105,7 @@ export default function SystemManagementPage() {
   const [loading, setLoading] = useState(true);
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role_name: 'viewer' as RiskUserRole });
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
+  const [resetDialog, setResetDialog] = useState<{ user: RiskAppUser; password: string; confirm: string } | null>(null);
   const [settingForm, setSettingForm] = useState({
     default_dashboard_view: 'overview',
     dashboard_save_status: 'enabled',
@@ -210,14 +211,29 @@ export default function SystemManagementPage() {
     }
   }
 
-  async function resetPassword(userRow: RiskAppUser) {
-    const password = window.prompt(`Enter a new password for ${userRow.username}. Minimum 8 characters.`);
-    if (!password) return;
+  function openResetPassword(userRow: RiskAppUser) {
+    setResetDialog({ user: userRow, password: '', confirm: '' });
+    setError('');
+    setStatus('');
+  }
+
+  async function submitResetPassword(event: FormEvent) {
+    event.preventDefault();
+    if (!resetDialog) return;
+    if (resetDialog.password.length < 8) {
+      setError('Reset password must be at least 8 characters.');
+      return;
+    }
+    if (resetDialog.password !== resetDialog.confirm) {
+      setError('Reset password confirmation does not match.');
+      return;
+    }
     setError('');
     setStatus('');
     try {
-      await resetRiskUserPassword(String(userRow.id), password);
-      setStatus(`Password reset for ${userRow.username}.`);
+      await resetRiskUserPassword(String(resetDialog.user.id), resetDialog.password);
+      setStatus(`Password reset for ${resetDialog.user.username}.`);
+      setResetDialog(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to reset password.');
     }
@@ -398,7 +414,7 @@ export default function SystemManagementPage() {
                       <td style={{ padding: 10, borderRadius: '0 12px 12px 0' }}>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <button type="button" onClick={() => saveUser(row)} style={buttonStyle}><Save size={14} /> Save</button>
-                          <button type="button" onClick={() => resetPassword(row)} style={{ ...buttonStyle, background: '#334155' }}><KeyRound size={14} /> Reset</button>
+                          <button type="button" onClick={() => openResetPassword(row)} style={{ ...buttonStyle, background: '#334155' }}><KeyRound size={14} /> Reset</button>
                           <button type="button" onClick={() => toggleUser(row)} style={{ ...buttonStyle, background: row.is_active ? '#b91c1c' : '#15803d' }}><ToggleLeft size={14} /> {row.is_active ? 'Deactivate' : 'Activate'}</button>
                         </div>
                       </td>
@@ -438,6 +454,38 @@ export default function SystemManagementPage() {
               </table>
             </div>
           </section>
+        )}
+
+        {resetDialog && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(2,6,23,.62)', display: 'grid', placeItems: 'center', padding: 18 }}>
+            <form onSubmit={submitResetPassword} style={{ width: 'min(100%, 440px)', borderRadius: 20, padding: 20, background: isDark ? '#061430' : '#FFFFFF', border: isDark ? '1px solid rgba(125,211,252,.24)' : '1px solid rgba(31,56,100,.14)', boxShadow: '0 28px 80px rgba(0,0,0,.32)', display: 'grid', gap: 12 }}>
+              <SectionTitle icon={<KeyRound size={18} />} title={`Reset ${resetDialog.user.username}`} />
+              <input
+                type="password"
+                placeholder="New password"
+                value={resetDialog.password}
+                onChange={event => setResetDialog(prev => prev ? { ...prev, password: event.target.value } : prev)}
+                style={inputStyle(isDark)}
+                minLength={8}
+                autoComplete="new-password"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Confirm new password"
+                value={resetDialog.confirm}
+                onChange={event => setResetDialog(prev => prev ? { ...prev, confirm: event.target.value } : prev)}
+                style={inputStyle(isDark)}
+                minLength={8}
+                autoComplete="new-password"
+                required
+              />
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => setResetDialog(null)} style={{ ...buttonStyle, background: isDark ? '#334155' : '#64748B' }}>Cancel</button>
+                <button type="submit" style={buttonStyle}><Save size={15} /> Save Password</button>
+              </div>
+            </form>
+          </div>
         )}
       </main>
     </div>

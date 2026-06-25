@@ -69,7 +69,7 @@ async function clearSavedDashboardData() {
 
 function readLastUpload(): LastUploadPayload | null {
   try {
-    const raw = window.localStorage.getItem(LAST_UPLOAD_KEY);
+    const raw = window.sessionStorage.getItem(LAST_UPLOAD_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as LastUploadPayload;
     if (!parsed?.data?.riskRegister?.length) return null;
@@ -89,7 +89,7 @@ export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'custome
   function saveLastUpload(d: DashboardData, name: string) {
     try {
       const payload: LastUploadPayload = { data: d, fileName: name, savedAt: new Date().toISOString() };
-      window.localStorage.setItem(LAST_UPLOAD_KEY, JSON.stringify(payload));
+      window.sessionStorage.setItem(LAST_UPLOAD_KEY, JSON.stringify(payload));
       setLastUpload(payload);
       setSaveStatus({ state: 'saving', savedAt: payload.savedAt, uploadedBy: user?.username || user?.name || 'Current user' });
       saveRiskDashboardState('last_upload_metadata', {

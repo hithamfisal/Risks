@@ -94,6 +94,7 @@ MYSQL_PASSWORD=DATABASE_PASSWORD
 MYSQL_DATABASE=cpaneluser_risk_dashboard
 RISK_SKIP_CREATE_DATABASE=1
 RISK_SESSION_SECRET=LONG_RANDOM_SECRET_CHANGE_THIS
+RISK_SEED_ADMIN_PASSWORD=ONE_TIME_ADMIN_PASSWORD_CHANGE_AFTER_LOGIN
 RISK_SESSION_TTL_HOURS=8
 RISK_MAX_FAILED_LOGINS=5
 RISK_LOCKOUT_MINUTES=15
@@ -139,15 +140,11 @@ Production health check:
 https://api.risks-dashboard.com/api/health
 ```
 
-## 6. Default users
+## 6. First admin user
 
-| Role | Username | Password |
-|---|---|---|
-| System Admin | `admin` | `Admin@12345` |
-| Risk Admin | `riskadmin` | `RiskAdmin@12345` |
-| Viewer / Customer | `viewer` | `Viewer@12345` |
-
-Change these passwords after the first login.
+When the production database has no users, the API creates one `system_admin` user named `admin`.
+Set `RISK_SEED_ADMIN_PASSWORD` in `.env` before the first start. The password must be at least 12 characters.
+Change this password after the first login, then create the Risk Admin and Viewer users from System Management.
 
 ## 7. API endpoints included
 
@@ -170,7 +167,7 @@ Login body:
 ```json
 {
   "username": "admin",
-  "password": "Admin@12345"
+  "password": "YOUR_ONE_TIME_ADMIN_PASSWORD"
 }
 ```
 
@@ -287,7 +284,7 @@ yarn dev:api
 Confirm:
 
 1. `http://127.0.0.1:4000/api/health` returns `ok: true`.
-2. Login works using `admin / Admin@12345`.
+2. Login works using `admin` and your `RISK_SEED_ADMIN_PASSWORD`.
 3. System Admin can open admin portal and company identity.
 4. Risk Admin can open dashboard and normal settings/branding pages.
 5. Viewer opens customer portal/dashboard only and does not see admin buttons.
