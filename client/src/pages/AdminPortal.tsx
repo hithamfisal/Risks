@@ -52,7 +52,7 @@ export default function AdminPortalPage() {
 
   return (
     <div
-      dir="rtl"
+      dir="ltr"
       style={{
         minHeight: '100vh',
         color: isDark ? '#F8FAFC' : '#172033',
@@ -69,13 +69,13 @@ export default function AdminPortalPage() {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: 'white', fontWeight: 950, fontSize: 20, lineHeight: 1.1 }}>{companyName}</div>
-          <div style={{ color: 'rgba(255,255,255,.58)', fontWeight: 800, fontSize: 12 }}>Admin Portal · إدارة النظام والإعدادات</div>
+          <div style={{ color: 'rgba(255,255,255,.58)', fontWeight: 800, fontSize: 12 }}>Admin Portal · System management and settings</div>
         </div>
         <Link href="/customer" style={{ height: 38, borderRadius: 999, padding: '0 14px', color: 'white', background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.14)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 900 }}>
-          <Eye size={16} /> معاينة بوابة العميل
+          <Eye size={16} /> Preview Customer Portal
         </Link>
         <button onClick={logout} style={{ height: 38, borderRadius: 999, border: '1px solid rgba(255,255,255,.14)', background: 'rgba(255,255,255,.08)', color: 'white', fontWeight: 900, fontSize: 12, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-          <LogOut size={16} /> خروج
+          <LogOut size={16} /> Sign Out
         </button>
       </header>
 
@@ -84,9 +84,9 @@ export default function AdminPortalPage() {
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 30, borderRadius: 999, padding: '0 12px', background: isDark ? 'rgba(56,189,248,.12)' : '#EBF4FF', color: isDark ? '#7DD3FC' : '#073266', fontSize: 12, fontWeight: 950, marginBottom: 12 }}>
             <Database size={15} /> Namecheap MySQL + Secure Auth
           </div>
-          <h1 style={{ margin: 0, fontSize: 34, fontWeight: 950, letterSpacing: '-.04em' }}>بوابة الإدارة</h1>
+          <h1 style={{ margin: 0, fontSize: 34, fontWeight: 950, letterSpacing: '-.04em' }}>Admin Portal</h1>
           <p style={{ margin: '10px 0 0', color: isDark ? '#A8C3DD' : '#64748B', lineHeight: 1.8, maxWidth: 820, fontWeight: 750 }}>
-            هذه البوابة مخصصة للـ System Admin و Risk Admin فقط. منها يتم فتح لوحة المخاطر، إدارة هوية الشركة، وفصل الإعدادات الإدارية عن واجهة العميل.
+            This portal is available to System Admin and Risk Admin users. Open the risk dashboard, manage company identity, and keep administrative settings separate from the customer experience.
           </p>
           <div style={{ marginTop: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ borderRadius: 999, padding: '8px 12px', background: isDark ? 'rgba(15,23,42,.65)' : '#F1F5F9', color: isDark ? '#CBD5E1' : '#334155', fontSize: 12, fontWeight: 900 }}>User: {user?.username || user?.email}</span>
@@ -96,11 +96,11 @@ export default function AdminPortalPage() {
         </section>
 
         <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
-          <PortalCard href="/admin/dashboard" icon={<Gauge size={24} />} title="لوحة المخاطر" description="رفع ملف المخاطر وتحليل المؤشرات والرسوم والجداول من داخل بوابة الإدارة." badge="Dashboard" />
-          <PortalCard href="/admin/company-identity" icon={<ImagePlus size={24} />} title="هوية الشركة" description="تعديل اسم الشركة، الشعار، الخلفية، الألوان وبيانات التواصل لكل Tenant بشكل مستقل." badge="Identity" />
-          <PortalCard href="/customer" icon={<Building2 size={24} />} title="بوابة العميل" description="فتح واجهة العميل المنفصلة لمراجعة الشكل الذي يراه المستخدمون خارج لوحة الإدارة." badge="Customer" />
+          <PortalCard href="/admin/dashboard" icon={<Gauge size={24} />} title="Risk Dashboard" description="Upload risk files and analyze KPIs, charts, and tables from the admin portal." badge="Dashboard" />
+          <PortalCard href="/admin/company-identity" icon={<ImagePlus size={24} />} title="Company Identity" description="Update company name, logo, cover image, colors, and contact details for each tenant." badge="Identity" />
+          <PortalCard href="/customer" icon={<Building2 size={24} />} title="Customer Portal" description="Open the separate customer-facing portal to review what non-admin users see." badge="Customer" />
           {user?.role === 'system_admin' && (
-            <PortalCard href="/admin/company-identity" icon={<Users size={24} />} title="إدارة Tenants" description="System Admin يمكنه اختيار أي Tenant من صفحة الهوية وتعديل بياناته وشعاره وخلفيته." badge="System Admin" />
+            <PortalCard href="/admin/company-identity" icon={<Users size={24} />} title="Tenant Management" description="System Admin users can select any tenant from the identity page and update its details, logo, and cover image." badge="System Admin" />
           )}
         </section>
       </main>

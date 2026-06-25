@@ -24,7 +24,7 @@ function Redirect({ to }: { to: string }) {
   return null;
 }
 
-function LoadingScreen({ label = 'جاري التحقق من جلسة الدخول...' }: { label?: string }) {
+function LoadingScreen({ label = 'Checking your session...' }: { label?: string }) {
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', fontWeight: 900, color: '#0f172a' }}>
       {label}
@@ -45,7 +45,7 @@ function ProtectedRoute({ children, adminOnly = false }: { children: ReactElemen
 function PublicOnlyRoute({ children }: { children: ReactElement }) {
   const { loading, isAuthenticated, user } = useAuth();
 
-  if (loading) return <LoadingScreen label="جاري التحميل..." />;
+  if (loading) return <LoadingScreen label="Loading..." />;
   if (isAuthenticated) return <Redirect to={isAdminRole(user?.role) ? '/admin' : '/customer'} />;
 
   return children;

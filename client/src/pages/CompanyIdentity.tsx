@@ -84,7 +84,7 @@ export default function CompanyIdentityPage() {
       setPending({ logo: null, cover: null });
       setPreviews({ logo: tenant.logo_url || '', cover: tenant.cover_image_url || '' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'تعذر تحميل هوية الشركة.');
+      setError(err instanceof Error ? err.message : 'Unable to load company identity.');
     } finally {
       setLoading(false);
     }
@@ -101,7 +101,7 @@ export default function CompanyIdentityPage() {
         setTenantOptions(tenants);
         if (!activeTenant && tenants[0]) setActiveTenant(tenants[0].id);
       })
-      .catch(err => setError(err instanceof Error ? err.message : 'تعذر تحميل قائمة الشركات.'));
+      .catch(err => setError(err instanceof Error ? err.message : 'Unable to load the company list.'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperAdmin]);
 
@@ -124,9 +124,9 @@ export default function CompanyIdentityPage() {
 
   function validateImage(file: File, kind: ImageKind): string {
     const max = kind === 'logo' ? MAX_LOGO_BYTES : MAX_COVER_BYTES;
-    if (!ALLOWED_IMAGE_RE.test(file.name)) return 'صيغة الصورة غير مدعومة. المسموح: png, jpg, jpeg, webp.';
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return 'نوع الملف غير مدعوم. اختر صورة فقط.';
-    if (file.size > max) return `حجم الملف أكبر من المسموح. الحد الأقصى ${kind === 'logo' ? '2MB' : '5MB'}.`;
+    if (!ALLOWED_IMAGE_RE.test(file.name)) return 'Unsupported image format. Allowed: png, jpg, jpeg, webp.';
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return 'Unsupported file type. Please choose an image file.';
+    if (file.size > max) return `File size exceeds the limit. Maximum ${kind === 'logo' ? '2MB' : '5MB'}.`;
     return '';
   }
 
@@ -174,9 +174,9 @@ export default function CompanyIdentityPage() {
       setForm(next);
       setPending({ logo: null, cover: null });
       setPreviews({ logo: next.logo_url || '', cover: next.cover_image_url || '' });
-      setSuccess('تم حفظ هوية الشركة بنجاح، وسيتم عرض الشعار واسم الشركة في الهيدر.');
+      setSuccess('Company identity saved successfully. The logo and company name will appear in the header.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'تعذر حفظ هوية الشركة.');
+      setError(err instanceof Error ? err.message : 'Unable to save company identity.');
     } finally {
       setSaving(false);
     }
@@ -187,7 +187,7 @@ export default function CompanyIdentityPage() {
   return (
     <div
       className="min-h-screen"
-      dir="rtl"
+      dir="ltr"
       style={{
         color: isDark ? '#F8FAFC' : '#172033',
         backgroundColor: isDark ? '#061630' : '#F8FBFF',
@@ -199,7 +199,7 @@ export default function CompanyIdentityPage() {
       }}
     >
       <header style={{ position: 'sticky', top: 0, zIndex: 20, background: '#0b1120', borderBottom: '1px solid rgba(255,255,255,0.08)', height: 64, display: 'flex', alignItems: 'center', gap: 14, padding: '0 22px', boxShadow: '0 2px 18px rgba(0,0,0,.35)' }}>
-        <Link href="/admin" style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: 'white', background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.12)', textDecoration: 'none' }} title="العودة للداشبورد">
+        <Link href="/admin" style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: 'white', background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.12)', textDecoration: 'none' }} title="Back to admin portal">
           <ArrowLeft size={18} />
         </Link>
         <div style={{ width: 42, height: 42, borderRadius: 14, background: 'linear-gradient(135deg, #0078FF, #00AEEF)', display: 'grid', placeItems: 'center', overflow: 'hidden', flex: '0 0 auto' }}>
@@ -207,13 +207,13 @@ export default function CompanyIdentityPage() {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 950, color: 'white', lineHeight: 1.1 }}>{companyName}</div>
-          <div style={{ fontSize: 11, fontWeight: 750, color: 'rgba(255,255,255,.58)' }}>صفحة هوية الشركة / Company Identity Settings</div>
+          <div style={{ fontSize: 11, fontWeight: 750, color: 'rgba(255,255,255,.58)' }}>Company Identity Settings</div>
         </div>
         <button onClick={saveIdentity} disabled={saving || loading || !form} style={{ height: 38, borderRadius: 999, border: 'none', background: saving ? 'rgba(148,163,184,.5)' : 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 900, fontSize: 13, padding: '0 18px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: saving ? 'not-allowed' : 'pointer' }}>
-          <Save size={16} /> {saving ? 'جاري الحفظ...' : 'حفظ الهوية'}
+          <Save size={16} /> {saving ? 'Saving...' : 'Save Identity'}
         </button>
         <button onClick={logout} style={{ height: 38, borderRadius: 999, border: '1px solid rgba(255,255,255,.16)', background: 'rgba(255,255,255,.08)', color: 'white', fontWeight: 900, fontSize: 13, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-          <LogOut size={16} /> خروج
+          <LogOut size={16} /> Sign Out
         </button>
       </header>
 
@@ -222,23 +222,23 @@ export default function CompanyIdentityPage() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
             <div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 28, borderRadius: 999, padding: '0 12px', background: isDark ? 'rgba(56,189,248,.12)' : '#EBF4FF', color: isDark ? '#7DD3FC' : '#073266', fontSize: 12, fontWeight: 900, marginBottom: 10 }}>
-                <ShieldCheck size={15} /> صلاحيات آمنة حسب Tenant
+                <ShieldCheck size={15} /> Secure tenant-based permissions
               </div>
-              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 950, letterSpacing: '-.03em', color: isDark ? '#F8FAFC' : '#0f172a' }}>هوية الشركة</h1>
+              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 950, letterSpacing: '-.03em', color: isDark ? '#F8FAFC' : '#0f172a' }}>Company Identity</h1>
               <p style={{ margin: '8px 0 0', color: isDark ? '#A8C3DD' : '#64748B', fontSize: 14, lineHeight: 1.8, maxWidth: 760 }}>
-                Tenant Admin يعدّل هوية شركته فقط. Super Admin يستطيع اختيار أي Tenant وتعديل هويته. رفع الشعار والخلفية يتم من الجهاز مع معاينة مباشرة قبل الحفظ.
+                Tenant Admin users can edit only their company identity. Super Admin users can select any tenant and update its identity. Logo and cover uploads include a live preview before saving.
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'end', gap: 10, flexWrap: 'wrap' }}>
               <label style={{ display: 'grid', gap: 6, minWidth: 210 }}>
-                <span style={{ fontSize: 12, fontWeight: 900, color: isDark ? '#CBD5E1' : '#334155' }}>المستخدم الحالي</span>
-                <input value={`${user?.name || ''} — ${user?.role || ''}`} readOnly style={{ ...inputStyle(isDark), opacity: .82 }} />
+                <span style={{ fontSize: 12, fontWeight: 900, color: isDark ? '#CBD5E1' : '#334155' }}>Current User</span>
+                <input value={`${user?.name || ''} - ${user?.role || ''}`} readOnly style={{ ...inputStyle(isDark), opacity: .82 }} />
               </label>
               <label style={{ display: 'grid', gap: 6, minWidth: 240 }}>
-                <span style={{ fontSize: 12, fontWeight: 900, color: isDark ? '#CBD5E1' : '#334155' }}>{isSuperAdmin ? 'اختيار الشركة / Tenant' : 'Tenant ID'}</span>
+                <span style={{ fontSize: 12, fontWeight: 900, color: isDark ? '#CBD5E1' : '#334155' }}>{isSuperAdmin ? 'Select Company / Tenant' : 'Tenant ID'}</span>
                 {isSuperAdmin ? (
                   <select value={activeTenant} onChange={e => setActiveTenant(e.target.value)} style={inputStyle(isDark)}>
-                    {tenantOptions.map(tenant => <option key={tenant.id} value={tenant.id}>{tenant.company_name} — {tenant.id}</option>)}
+                    {tenantOptions.map(tenant => <option key={tenant.id} value={tenant.id}>{tenant.company_name} - {tenant.id}</option>)}
                     {!tenantOptions.some(tenant => tenant.id === activeTenant) && <option value={activeTenant}>{activeTenant}</option>}
                   </select>
                 ) : (
@@ -257,26 +257,26 @@ export default function CompanyIdentityPage() {
         )}
 
         {loading || !form ? (
-          <div style={{ ...cardStyle, padding: 28, textAlign: 'center', fontWeight: 900 }}>جاري تحميل بيانات الهوية...</div>
+          <div style={{ ...cardStyle, padding: 28, textAlign: 'center', fontWeight: 900 }}>Loading identity data...</div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18, alignItems: 'start' }}>
             <section style={{ ...cardStyle, padding: 20 }}>
-              <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 950 }}>البيانات الأساسية</h2>
+              <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 950 }}>Basic Details</h2>
               <div style={{ display: 'grid', gap: 14 }}>
                 <label style={{ display: 'grid', gap: 7 }}>
-                  <span style={{ fontSize: 12, fontWeight: 900 }}>اسم الشركة</span>
-                  <input value={form.company_name} onChange={e => updateField('company_name', e.target.value)} style={inputStyle(isDark)} placeholder="اسم الشركة" />
+                  <span style={{ fontSize: 12, fontWeight: 900 }}>Company Name</span>
+                  <input value={form.company_name} onChange={e => updateField('company_name', e.target.value)} style={inputStyle(isDark)} placeholder="Company name" />
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <label style={{ display: 'grid', gap: 7 }}>
-                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Palette size={14} /> اللون الأساسي</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Palette size={14} /> Primary Color</span>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <input type="color" value={form.primary_color || '#073266'} onChange={e => updateField('primary_color', e.target.value)} style={{ width: 52, height: 42, border: 'none', borderRadius: 12, padding: 0, background: 'transparent' }} />
                       <input value={form.primary_color} onChange={e => updateField('primary_color', e.target.value)} style={inputStyle(isDark)} />
                     </div>
                   </label>
                   <label style={{ display: 'grid', gap: 7 }}>
-                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Palette size={14} /> اللون الثانوي</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Palette size={14} /> Secondary Color</span>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <input type="color" value={form.secondary_color || '#0078FF'} onChange={e => updateField('secondary_color', e.target.value)} style={{ width: 52, height: 42, border: 'none', borderRadius: 12, padding: 0, background: 'transparent' }} />
                       <input value={form.secondary_color} onChange={e => updateField('secondary_color', e.target.value)} style={inputStyle(isDark)} />
@@ -285,25 +285,25 @@ export default function CompanyIdentityPage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <label style={{ display: 'grid', gap: 7 }}>
-                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Phone size={14} /> رقم التواصل / واتساب</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Phone size={14} /> Contact / WhatsApp Number</span>
                     <input value={form.whatsapp_number} onChange={e => updateField('whatsapp_number', e.target.value)} style={inputStyle(isDark)} placeholder="+966..." />
                   </label>
                   <label style={{ display: 'grid', gap: 7 }}>
-                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Mail size={14} /> بريد الدعم</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Mail size={14} /> Support Email</span>
                     <input value={form.support_email} onChange={e => updateField('support_email', e.target.value)} style={inputStyle(isDark)} placeholder="support@company.com" />
                   </label>
                 </div>
                 <label style={{ display: 'grid', gap: 7 }}>
-                  <span style={{ fontSize: 12, fontWeight: 900 }}>وصف الشركة</span>
-                  <textarea value={form.description} onChange={e => updateField('description', e.target.value)} rows={5} style={{ ...inputStyle(isDark), height: 'auto', paddingTop: 12, resize: 'vertical', lineHeight: 1.7 }} placeholder="وصف مختصر للشركة" />
+                  <span style={{ fontSize: 12, fontWeight: 900 }}>Company Description</span>
+                  <textarea value={form.description} onChange={e => updateField('description', e.target.value)} rows={5} style={{ ...inputStyle(isDark), height: 'auto', paddingTop: 12, resize: 'vertical', lineHeight: 1.7 }} placeholder="Short company description" />
                 </label>
               </div>
             </section>
 
             <aside style={{ display: 'grid', gap: 18 }}>
               <ImageUploadCard
-                title="الشعار Logo"
-                subtitle="PNG / JPG / JPEG / WEBP — حد أقصى 2MB"
+                title="Logo"
+                subtitle="PNG / JPG / JPEG / WEBP - Maximum 2MB"
                 kind="logo"
                 preview={previews.logo}
                 file={pending.logo}
@@ -313,8 +313,8 @@ export default function CompanyIdentityPage() {
                 onChange={selectImage}
               />
               <ImageUploadCard
-                title="صورة الخلفية / الغلاف"
-                subtitle="PNG / JPG / JPEG / WEBP — حد أقصى 5MB"
+                title="Cover Image"
+                subtitle="PNG / JPG / JPEG / WEBP - Maximum 5MB"
                 kind="cover"
                 preview={previews.cover}
                 file={pending.cover}
@@ -371,14 +371,14 @@ function ImageUploadCard({
         ) : (
           <div style={{ textAlign: 'center', color: isDark ? '#A8C3DD' : '#64748B', fontWeight: 850 }}>
             <UploadCloud size={28} style={{ margin: '0 auto 8px' }} />
-            لا توجد صورة حالياً
+            No image selected
           </div>
         )}
       </div>
 
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={event => onChange(kind, event)} style={{ display: 'none' }} />
       <button type="button" onClick={onPick} style={{ width: '100%', height: 42, borderRadius: 999, border: 'none', background: 'linear-gradient(135deg, #073266, #0078FF)', color: 'white', fontWeight: 950, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-        <UploadCloud size={17} /> استعراض / اختيار ملف
+        <UploadCloud size={17} /> Browse / Choose File
       </button>
       {file && <div style={{ marginTop: 9, fontSize: 12, fontWeight: 850, color: isDark ? '#7DD3FC' : '#075985', direction: 'ltr', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>}
     </section>

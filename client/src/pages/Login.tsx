@@ -32,13 +32,13 @@ export default function LoginPage() {
       await login(username, password);
       setLocation('/');
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'تعذر تسجيل الدخول.');
+      setLocalError(err instanceof Error ? err.message : 'Unable to sign in.');
     }
   }
 
   return (
     <div
-      dir="rtl"
+      dir="ltr"
       className="min-h-screen"
       style={{
         display: 'grid',
@@ -68,21 +68,21 @@ export default function LoginPage() {
         </div>
         <div style={{ textAlign: 'center', marginBottom: 22 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 28, borderRadius: 999, padding: '0 12px', background: isDark ? 'rgba(56,189,248,.12)' : '#EBF4FF', color: isDark ? '#7DD3FC' : '#073266', fontSize: 12, fontWeight: 950, marginBottom: 10 }}>
-            <ShieldCheck size={15} /> مصادقة آمنة + Namecheap MySQL
+            <ShieldCheck size={15} /> Secure authentication + Namecheap MySQL
           </div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 950, letterSpacing: '-.03em' }}>تسجيل الدخول</h1>
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 950, letterSpacing: '-.03em' }}>Sign In</h1>
           <p style={{ margin: '8px 0 0', color: isDark ? '#A8C3DD' : '#64748B', lineHeight: 1.7, fontSize: 13 }}>
-            يتم توجيه المستخدم تلقائياً إلى Admin Portal أو Customer Portal حسب الدور المحفوظ في Namecheap MySQL.
+            Users are routed automatically to the Admin Portal or Customer Portal based on their saved Namecheap MySQL role.
           </p>
         </div>
 
         <div style={{ display: 'grid', gap: 14 }}>
           <label style={{ display: 'grid', gap: 7 }}>
-            <span style={{ fontSize: 12, fontWeight: 900 }}>اسم المستخدم</span>
+            <span style={{ fontSize: 12, fontWeight: 900 }}>Username</span>
             <input type="text" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle(isDark)} autoComplete="username" required />
           </label>
           <label style={{ display: 'grid', gap: 7 }}>
-            <span style={{ fontSize: 12, fontWeight: 900 }}>كلمة المرور</span>
+            <span style={{ fontSize: 12, fontWeight: 900 }}>Password</span>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle(isDark)} autoComplete="current-password" required />
           </label>
 
@@ -93,7 +93,7 @@ export default function LoginPage() {
           )}
 
           <button type="submit" disabled={loading} style={{ height: 46, borderRadius: 999, border: 'none', background: loading ? 'rgba(148,163,184,.5)' : 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 950, fontSize: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: loading ? 'not-allowed' : 'pointer' }}>
-            <LogIn size={18} /> {loading ? 'جاري الدخول...' : 'دخول'}
+            <LogIn size={18} /> {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </div>
 

@@ -16,7 +16,7 @@ export default function CustomerPortalPage() {
 
   return (
     <div
-      dir="rtl"
+      dir="ltr"
       style={{
         minHeight: '100vh',
         color: isDark ? '#F8FAFC' : '#172033',
@@ -33,15 +33,15 @@ export default function CustomerPortalPage() {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: 'white', fontWeight: 950, fontSize: 20, lineHeight: 1.1 }}>{companyName}</div>
-          <div style={{ color: 'rgba(255,255,255,.58)', fontWeight: 800, fontSize: 12 }}>Customer Portal · واجهة العميل</div>
+          <div style={{ color: 'rgba(255,255,255,.58)', fontWeight: 800, fontSize: 12 }}>Customer Portal · Customer interface</div>
         </div>
         {isAdmin(user?.role) && (
           <Link href="/admin" style={{ height: 38, borderRadius: 999, padding: '0 14px', color: 'white', background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.14)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 900 }}>
-            <UserRoundCog size={16} /> بوابة الإدارة
+            <UserRoundCog size={16} /> Admin Portal
           </Link>
         )}
         <button onClick={logout} style={{ height: 38, borderRadius: 999, border: '1px solid rgba(255,255,255,.14)', background: 'rgba(255,255,255,.08)', color: 'white', fontWeight: 900, fontSize: 12, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-          <LogOut size={16} /> خروج
+          <LogOut size={16} /> Sign Out
         </button>
       </header>
 
@@ -53,11 +53,11 @@ export default function CustomerPortalPage() {
             </div>
             <div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 30, borderRadius: 999, padding: '0 12px', background: isDark ? 'rgba(56,189,248,.12)' : '#EBF4FF', color: isDark ? '#7DD3FC' : '#073266', fontSize: 12, fontWeight: 950, marginBottom: 12 }}>
-                <Building2 size={15} /> بوابة العميل المستقلة
+                <Building2 size={15} /> Standalone Customer Portal
               </div>
               <h1 style={{ margin: 0, fontSize: 38, fontWeight: 950, letterSpacing: '-.04em' }}>{companyName}</h1>
               <p style={{ margin: '12px 0 0', lineHeight: 1.9, color: isDark ? '#A8C3DD' : '#64748B', maxWidth: 760, fontWeight: 760 }}>
-                {tenant?.description || 'واجهة مخصصة للعميل تعرض هوية الشركة ومداخل الخدمات دون إظهار إعدادات الإدارة أو صلاحيات System Admin / Risk Admin.'}
+                {tenant?.description || 'A customer-facing portal that shows company identity and service entry points without exposing admin settings or System Admin / Risk Admin controls.'}
               </p>
             </div>
           </div>
@@ -65,22 +65,22 @@ export default function CustomerPortalPage() {
           <div style={{ marginTop: 26, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 14 }}>
             <div style={{ borderRadius: 22, padding: 18, background: isDark ? 'rgba(15,23,42,.55)' : '#F8FAFC', border: isDark ? '1px solid rgba(125,211,252,.14)' : '1px solid rgba(31,56,100,.08)' }}>
               <Headphones size={22} color={tenant?.secondary_color || '#0078FF'} />
-              <h3 style={{ margin: '10px 0 6px', fontWeight: 950 }}>الدعم والتواصل</h3>
-              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: isDark ? '#CBD5E1' : '#64748B', fontWeight: 750 }}>معلومات التواصل تظهر من هوية Tenant المحفوظة.</p>
+              <h3 style={{ margin: '10px 0 6px', fontWeight: 950 }}>Support & Contact</h3>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: isDark ? '#CBD5E1' : '#64748B', fontWeight: 750 }}>Contact details are loaded from the saved tenant identity.</p>
             </div>
             <div style={{ borderRadius: 22, padding: 18, background: isDark ? 'rgba(15,23,42,.55)' : '#F8FAFC', border: isDark ? '1px solid rgba(125,211,252,.14)' : '1px solid rgba(31,56,100,.08)' }}>
               <BarChart3 size={22} color={tenant?.secondary_color || '#0078FF'} />
-              <h3 style={{ margin: '10px 0 6px', fontWeight: 950 }}>لوحة المؤشرات</h3>
-              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: isDark ? '#CBD5E1' : '#64748B', fontWeight: 750 }}>يمكن فتح لوحة المخاطر من بوابة العميل بدون إظهار إعدادات الإدارة.</p>
+              <h3 style={{ margin: '10px 0 6px', fontWeight: 950 }}>Dashboard</h3>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: isDark ? '#CBD5E1' : '#64748B', fontWeight: 750 }}>Open the risk dashboard from the customer portal without exposing admin settings.</p>
             </div>
           </div>
 
           <div style={{ marginTop: 26, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <Link href="/customer/dashboard" style={{ height: 44, borderRadius: 999, padding: '0 20px', color: 'white', background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 950 }}>
-              <BarChart3 size={17} /> فتح لوحة المخاطر
+              <BarChart3 size={17} /> Open Risk Dashboard
             </Link>
-            {tenant?.whatsapp_number && <a href={`https://wa.me/${tenant.whatsapp_number.replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" style={{ height: 44, borderRadius: 999, padding: '0 18px', color: isDark ? '#F8FAFC' : '#073266', background: isDark ? 'rgba(15,23,42,.62)' : '#F1F5F9', border: isDark ? '1px solid rgba(125,211,252,.16)' : '1px solid rgba(31,56,100,.08)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 950 }}><Phone size={16} /> واتساب</a>}
-            {tenant?.support_email && <a href={`mailto:${tenant.support_email}`} style={{ height: 44, borderRadius: 999, padding: '0 18px', color: isDark ? '#F8FAFC' : '#073266', background: isDark ? 'rgba(15,23,42,.62)' : '#F1F5F9', border: isDark ? '1px solid rgba(125,211,252,.16)' : '1px solid rgba(31,56,100,.08)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 950 }}><Mail size={16} /> بريد الدعم</a>}
+            {tenant?.whatsapp_number && <a href={`https://wa.me/${tenant.whatsapp_number.replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" style={{ height: 44, borderRadius: 999, padding: '0 18px', color: isDark ? '#F8FAFC' : '#073266', background: isDark ? 'rgba(15,23,42,.62)' : '#F1F5F9', border: isDark ? '1px solid rgba(125,211,252,.16)' : '1px solid rgba(31,56,100,.08)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 950 }}><Phone size={16} /> WhatsApp</a>}
+            {tenant?.support_email && <a href={`mailto:${tenant.support_email}`} style={{ height: 44, borderRadius: 999, padding: '0 18px', color: isDark ? '#F8FAFC' : '#073266', background: isDark ? 'rgba(15,23,42,.62)' : '#F1F5F9', border: isDark ? '1px solid rgba(125,211,252,.16)' : '1px solid rgba(31,56,100,.08)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 950 }}><Mail size={16} /> Support Email</a>}
           </div>
         </section>
       </main>
