@@ -1,10 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'wouter';
 import {
   ArrowLeft,
   CheckCircle2,
   Download,
   Eye,
+  FileUp,
   FileClock,
   KeyRound,
   Lock,
@@ -22,15 +23,19 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { changePassword } from '@/lib/auth';
 import {
   createRiskUser,
+  getRiskBackup,
   getRiskAuditLogs,
   getRiskSettings,
+  getRiskSystemStatus,
   listRiskUsers,
   resetRiskUserPassword,
+  restoreRiskBackup,
   saveRiskSettings,
   toggleRiskUserActive,
   updateRiskUser,
   type RiskAppUser,
   type RiskAuditLog,
+  type RiskSystemStatus,
   type RiskUserRole,
 } from '@/lib/riskApi';
 
@@ -93,12 +98,13 @@ function toCsv(rows: Array<Record<string, unknown>>) {
 }
 
 export default function SystemManagementPage() {
-  const { user, tenant, logout } = useAuth();
+  const { user, tenant, logout, refresh } = useAuth();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const isSystemAdmin = user?.role === 'system_admin';
   const [users, setUsers] = useState<RiskAppUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<RiskAuditLog[]>([]);
+  const [systemStatus, setSystemStatus] = useState<RiskSystemStatus | null>(null);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -106,6 +112,7 @@ export default function SystemManagementPage() {
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role_name: 'viewer' as RiskUserRole });
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
   const [resetDialog, setResetDialog] = useState<{ user: RiskAppUser; password: string; confirm: string } | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
   const [settingForm, setSettingForm] = useState({
     default_dashboard_view: 'overview',
     dashboard_save_status: 'enabled',
@@ -126,14 +133,16 @@ export default function SystemManagementPage() {
     setLoading(true);
     setError('');
     try {
-      const [nextSettings, nextAudit, nextUsers] = await Promise.all([
+      const [nextSettings, nextAudit, nextUsers, nextStatus] = await Promise.all([
         getRiskSettings(),
         isSystemAdmin ? getRiskAuditLogs(100) : Promise.resolve([]),
         isSystemAdmin ? listRiskUsers() : Promise.resolve([]),
+        isSystemAdmin ? getRiskSystemStatus() : Promise.resolve(null),
       ]);
       setSettings(nextSettings);
       setAuditLogs(nextAudit);
       setUsers(nextUsers);
+      setSystemStatus(nextStatus);
       setSettingForm({
         default_dashboard_view: String(nextSettings.default_dashboard_view || 'overview'),
         dashboard_save_status: String(nextSettings.dashboard_save_status || 'enabled'),
@@ -161,6 +170,7 @@ export default function SystemManagementPage() {
     }
     try {
       await changePassword(passwordForm.current, passwordForm.next);
+      await refresh();
       setPasswordForm({ current: '', next: '', confirm: '' });
       setStatus('Password changed successfully.');
     } catch (err) {
@@ -255,6 +265,34 @@ export default function SystemManagementPage() {
     downloadText('risk-settings.json', JSON.stringify(settings, null, 2));
   }
 
+  async function exportBackup() {
+    setError('');
+    setStatus('');
+    try {
+      const backup = await getRiskBackup();
+      downloadText(`risk-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(backup, null, 2));
+      setStatus('Backup JSON exported.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to export backup.');
+    }
+  }
+
+  async function restoreFromFile(file: File) {
+    setError('');
+    setStatus('');
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const restored = await restoreRiskBackup(parsed);
+      setStatus(`Restore complete: ${restored.settings} settings and ${restored.dashboard_state} dashboard state records.`);
+      await loadManagementData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to restore backup JSON.');
+    } finally {
+      if (restoreInputRef.current) restoreInputRef.current.value = '';
+    }
+  }
+
   function exportUsers() {
     const rows = users.map(row => ({ ...row, role: row.role_name || row.role }));
     downloadText('risk-users.csv', toCsv(rows as Array<Record<string, unknown>>), 'text/csv');
@@ -322,6 +360,9 @@ export default function SystemManagementPage() {
             <Metric label="Users" value={isSystemAdmin ? String(users.length) : 'System Admin only'} icon={<Users size={18} />} isDark={isDark} />
             <Metric label="Audit Logs" value={isSystemAdmin ? String(auditLogs.length) : 'System Admin only'} icon={<FileClock size={18} />} isDark={isDark} />
             <Metric label="Settings" value={`${Object.keys(settings).length} saved keys`} icon={<Settings size={18} />} isDark={isDark} />
+            <Metric label="Failed Logins 24h" value={isSystemAdmin ? String(systemStatus?.security.failed_logins_24h ?? 0) : 'System Admin only'} icon={<Lock size={18} />} isDark={isDark} />
+            <Metric label="Locked Users" value={isSystemAdmin ? String(systemStatus?.users.locked ?? 0) : 'System Admin only'} icon={<ShieldCheck size={18} />} isDark={isDark} />
+            <Metric label="Version" value={systemStatus?.version || 'Local'} icon={<Eye size={18} />} isDark={isDark} />
           </div>
         </section>
 
@@ -365,12 +406,45 @@ export default function SystemManagementPage() {
           <section style={{ ...cardStyle }}>
             <SectionTitle icon={<Download size={18} />} title="Backup & Export" />
             <div style={{ display: 'grid', gap: 10 }}>
+              <button type="button" onClick={exportBackup} disabled={!isSystemAdmin} style={{ ...buttonStyle, opacity: isSystemAdmin ? 1 : .55 }}><Download size={15} /> Export Full Backup JSON</button>
+              <input ref={restoreInputRef} type="file" accept="application/json,.json" onChange={event => { const file = event.target.files?.[0]; if (file) restoreFromFile(file); }} style={{ display: 'none' }} />
+              <button type="button" onClick={() => restoreInputRef.current?.click()} disabled={!isSystemAdmin} style={{ ...buttonStyle, background: '#0f766e', opacity: isSystemAdmin ? 1 : .55 }}><FileUp size={15} /> Restore Settings JSON</button>
               <button type="button" onClick={exportSettings} style={buttonStyle}><Download size={15} /> Export Settings JSON</button>
               <button type="button" onClick={exportUsers} disabled={!isSystemAdmin} style={{ ...buttonStyle, opacity: isSystemAdmin ? 1 : .55 }}><Download size={15} /> Export Users CSV</button>
               <button type="button" onClick={exportAudit} disabled={!isSystemAdmin} style={{ ...buttonStyle, opacity: isSystemAdmin ? 1 : .55 }}><Download size={15} /> Export Audit CSV</button>
             </div>
           </section>
         </div>
+
+        {isSystemAdmin && (
+          <section style={{ ...cardStyle }}>
+            <SectionTitle icon={<ShieldCheck size={18} />} title="Role Permissions" />
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px', minWidth: 720 }}>
+                <thead>
+                  <tr style={{ color: isDark ? '#A8C3DD' : '#64748B', fontSize: 12, textAlign: 'left' }}>
+                    <th>Role</th>
+                    <th>Dashboard</th>
+                    <th>Company Identity</th>
+                    <th>Users</th>
+                    <th>Backup / Audit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['System Admin', 'Full access', 'Full access', 'Create, edit, reset, deactivate', 'Export, restore, audit logs'],
+                    ['Risk Admin', 'Admin dashboard', 'Update branding', 'No user management', 'Settings export only'],
+                    ['Viewer', 'Customer dashboard', 'View active identity', 'No access', 'No access'],
+                  ].map(row => (
+                    <tr key={row[0]} style={{ background: isDark ? 'rgba(15,23,42,.55)' : '#F8FAFC' }}>
+                      {row.map((cell, index) => <td key={cell} style={{ padding: 10, borderRadius: index === 0 ? '12px 0 0 12px' : index === row.length - 1 ? '0 12px 12px 0' : 0, fontWeight: index === 0 ? 950 : 750 }}>{cell}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         {isSystemAdmin && (
           <section style={{ ...cardStyle }}>

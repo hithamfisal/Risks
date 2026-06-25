@@ -108,6 +108,7 @@ temp/
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
+deploy-packages/
 
 package-lock.json
 .yarn-cache/

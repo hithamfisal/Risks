@@ -144,7 +144,7 @@ https://api.risks-dashboard.com/api/health
 
 When the production database has no users, the API creates one `system_admin` user named `admin`.
 Set `RISK_SEED_ADMIN_PASSWORD` in `.env` before the first start. The password must be at least 12 characters.
-Change this password after the first login, then create the Risk Admin and Viewer users from System Management.
+The first admin is forced to change this password after login, then create the Risk Admin and Viewer users from System Management.
 
 ## 7. API endpoints included
 
@@ -160,6 +160,7 @@ GET /api/health
 POST /api/auth/login
 POST /api/auth/logout
 GET  /api/auth/me
+POST /api/auth/change-password
 ```
 
 Login body:
@@ -176,7 +177,13 @@ Login body:
 ```text
 GET  /api/app/settings
 POST /api/app/settings
+GET  /api/app/system-status
+GET  /api/app/backup
+POST /api/app/restore
 ```
+
+Backup export includes settings, public user metadata, audit logs, and dashboard state.
+Restore accepts settings and dashboard state only. It does not restore passwords or user accounts.
 
 ### User management
 
@@ -267,6 +274,7 @@ Confirm `.htaccess` exists in the frontend document root:
 - Login uses secure cookie/JWT session handling.
 - Failed login attempts are tracked in `risk_users.failed_attempts`.
 - Users are temporarily locked using `risk_users.locked_until`.
+- Seeded, newly created, and reset users are forced to change password before using normal app endpoints.
 - Login, logout, settings changes, user changes, dashboard-state changes, and branding uploads are written to `risk_audit_logs`.
 - Viewer users are redirected away from admin routes and do not see admin portal buttons.
 
@@ -276,6 +284,7 @@ Run:
 
 ```bash
 yarn run check
+yarn test
 yarn build
 yarn mysql:init
 yarn dev:api
@@ -294,7 +303,22 @@ Confirm:
 9. Exports still work.
 10. Production frontend uses `https://api.risks-dashboard.com`.
 
-## 12. Importing existing local/browser data into MySQL
+## 12. Deployment packages
+
+Create fresh upload ZIP files:
+
+```powershell
+yarn deploy:packages
+```
+
+The script builds the frontend and creates timestamped ZIP files in `deploy-packages/`:
+
+- frontend ZIP: extract into `public_html`
+- backend ZIP: extract into the Node.js app root
+
+The real `.env` file is intentionally not packaged.
+
+## 13. Importing existing local/browser data into MySQL
 
 The current dashboard still parses and stores workbook data in the browser/local flow. For server-side saved settings:
 

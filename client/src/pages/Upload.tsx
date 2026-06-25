@@ -6,9 +6,10 @@
 import { useState, useRef, DragEvent } from 'react';
 import { Link } from 'wouter';
 import { Upload, FileSpreadsheet, ArrowRight, AlertCircle, Clock3, Trash2, Sun, Moon, UserRoundCog, Building2 } from 'lucide-react';
-import { parseExcel, DashboardData } from '@/lib/excelParser';
+import type { DashboardData } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTenantIdentity } from '@/hooks/useTenantIdentity';
+import { validateWorkbookFile } from '@/lib/uploadSecurity';
 
 interface PreviousUploadInfo {
   fileName: string;
@@ -35,9 +36,6 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
   const { tenant: companyIdentity } = useTenantIdentity();
   const isDark = theme === 'dark';
 
-  const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024;
-  const ALLOWED_FILE_RE = /\.(xlsx|xls|xlsm|csv)$/i;
-
   function friendlyUploadError(err: unknown): string {
     const message = err instanceof Error ? err.message : '';
     if (message.startsWith('UPLOAD_VALIDATION:')) {
@@ -51,23 +49,12 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
 
   async function handleFile(file: File) {
     setNotice('');
-    if (!ALLOWED_FILE_RE.test(file.name)) {
-      setError('Invalid file type. Please upload .xlsx, .xls, .xlsm, or .csv only.');
-      return;
-    }
-    if (file.size === 0) {
-      setError('The selected file is empty. Please upload a valid workbook.');
-      return;
-    }
-    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-      setError('The selected file is too large. Please upload a file smaller than 25 MB.');
-      return;
-    }
-
     setError('');
     setLoading(true);
     try {
+      await validateWorkbookFile(file);
       const buffer = await file.arrayBuffer();
+      const { parseExcel } = await import('@/lib/excelParser');
       const data = parseExcel(buffer);
       onDataLoaded(data, file.name);
     } catch (e) {
@@ -103,6 +90,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
       const response = await fetch('/sample_data.xlsx', { cache: 'no-store' });
       if (!response.ok) throw new Error('Sample workbook not found');
       const buffer = await response.arrayBuffer();
+      const { parseExcel } = await import('@/lib/excelParser');
       const data = parseExcel(buffer);
       onDataLoaded(data, 'sample_data.xlsx');
     } catch (e) {

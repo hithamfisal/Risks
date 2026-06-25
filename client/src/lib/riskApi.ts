@@ -18,6 +18,7 @@ export type RiskAppUser = {
   role: RiskUserRole;
   role_name?: RiskUserRole;
   is_active: boolean;
+  must_change_password?: boolean;
   failed_attempts?: number;
   locked_until?: string | null;
   last_login_at?: string | null;
@@ -34,6 +35,32 @@ export type RiskAuditLog = {
   created_at?: string;
   ip_address?: string;
   [key: string]: unknown;
+};
+
+export type RiskSystemStatus = {
+  version: string;
+  database: string;
+  generated_at: string;
+  users: {
+    total: number;
+    active: number;
+    inactive: number;
+    pending_password_changes: number;
+    locked: number;
+  };
+  security: {
+    failed_logins_24h: number;
+  };
+  last_audit?: RiskAuditLog | null;
+};
+
+export type RiskBackup = {
+  version?: string;
+  exported_at?: string;
+  settings?: Record<string, unknown>;
+  users?: RiskAppUser[];
+  audit_logs?: RiskAuditLog[];
+  dashboard_state?: Array<{ key?: string; state_key?: string; state?: unknown; state_value?: unknown; updated_at?: string }>;
 };
 
 export async function getRiskSettings(): Promise<Record<string, unknown>> {
@@ -104,6 +131,29 @@ export async function getRiskAuditLogs(limit = 100): Promise<RiskAuditLog[]> {
   const response = await fetch(`${API_BASE_URL}/api/app/audit-logs?limit=${limit}`, { credentials: 'include', cache: 'no-store' });
   const body = await parseResponse<{ audit_logs: RiskAuditLog[] }>(response);
   return body.audit_logs;
+}
+
+export async function getRiskSystemStatus(): Promise<RiskSystemStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/app/system-status`, { credentials: 'include', cache: 'no-store' });
+  const body = await parseResponse<{ status: RiskSystemStatus }>(response);
+  return body.status;
+}
+
+export async function getRiskBackup(): Promise<RiskBackup> {
+  const response = await fetch(`${API_BASE_URL}/api/app/backup`, { credentials: 'include', cache: 'no-store' });
+  const body = await parseResponse<{ backup: RiskBackup }>(response);
+  return body.backup;
+}
+
+export async function restoreRiskBackup(backup: RiskBackup): Promise<{ settings: number; dashboard_state: number }> {
+  const response = await fetch(`${API_BASE_URL}/api/app/restore`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ backup }),
+  });
+  const body = await parseResponse<{ ok: boolean; restored: { settings: number; dashboard_state: number } }>(response);
+  return body.restored;
 }
 
 export async function getRiskDashboardState<T = unknown>(key = 'default'): Promise<T | null> {

@@ -12,6 +12,7 @@ export interface AuthUser {
   role: UserRole;
   role_name?: UserRole;
   is_active: boolean;
+  must_change_password?: boolean;
   failed_attempts?: number;
   locked_until?: string | null;
   last_login_at: string | null;

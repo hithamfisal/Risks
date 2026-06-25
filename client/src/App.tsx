@@ -2,16 +2,18 @@ import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/NotFound';
 import { Route, Switch, useLocation } from 'wouter';
-import { useEffect, type ReactElement } from 'react';
+import { lazy, Suspense, useEffect, type ReactElement } from 'react';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import Home from './pages/Home';
-import CompanyIdentityPage from './pages/CompanyIdentity';
-import LoginPage from './pages/Login';
-import AdminPortalPage from './pages/AdminPortal';
-import CustomerPortalPage from './pages/CustomerPortal';
-import SystemManagementPage from './pages/SystemManagement';
+
+const Home = lazy(() => import('./pages/Home'));
+const CompanyIdentityPage = lazy(() => import('./pages/CompanyIdentity'));
+const LoginPage = lazy(() => import('./pages/Login'));
+const AdminPortalPage = lazy(() => import('./pages/AdminPortal'));
+const CustomerPortalPage = lazy(() => import('./pages/CustomerPortal'));
+const SystemManagementPage = lazy(() => import('./pages/SystemManagement'));
+const ForcePasswordChangePage = lazy(() => import('./pages/ForcePasswordChange'));
 
 function isAdminRole(role?: string) {
   return role === 'system_admin' || role === 'risk_admin';
@@ -35,9 +37,11 @@ function LoadingScreen({ label = 'Checking your session...' }: { label?: string 
 
 function ProtectedRoute({ children, adminOnly = false }: { children: ReactElement; adminOnly?: boolean }) {
   const { loading, isAuthenticated, user } = useAuth();
+  const [location] = useLocation();
 
   if (loading) return <LoadingScreen />;
   if (!isAuthenticated) return <Redirect to="/login" />;
+  if (user?.must_change_password && location !== '/change-password') return <Redirect to="/change-password" />;
   if (adminOnly && !isAdminRole(user?.role)) return <Redirect to="/customer" />;
 
   return children;
@@ -47,6 +51,7 @@ function PublicOnlyRoute({ children }: { children: ReactElement }) {
   const { loading, isAuthenticated, user } = useAuth();
 
   if (loading) return <LoadingScreen label="Loading..." />;
+  if (isAuthenticated && user?.must_change_password) return <Redirect to="/change-password" />;
   if (isAuthenticated) return <Redirect to={isAdminRole(user?.role) ? '/admin' : '/customer'} />;
 
   return children;
@@ -56,6 +61,7 @@ function PortalRedirect() {
   const { loading, isAuthenticated, user } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!isAuthenticated) return <Redirect to="/login" />;
+  if (user?.must_change_password) return <Redirect to="/change-password" />;
   return <Redirect to={isAdminRole(user?.role) ? '/admin' : '/customer'} />;
 }
 
@@ -64,6 +70,9 @@ function Router() {
     <Switch>
       <Route path="/login">
         <PublicOnlyRoute><LoginPage /></PublicOnlyRoute>
+      </Route>
+      <Route path="/change-password">
+        <ProtectedRoute><ForcePasswordChangePage /></ProtectedRoute>
       </Route>
 
       <Route path="/admin/dashboard">
@@ -105,7 +114,9 @@ function App() {
         <AuthProvider>
           <TooltipProvider>
             <Toaster />
-            <Router />
+            <Suspense fallback={<LoadingScreen label="Loading page..." />}>
+              <Router />
+            </Suspense>
           </TooltipProvider>
         </AuthProvider>
       </ThemeProvider>

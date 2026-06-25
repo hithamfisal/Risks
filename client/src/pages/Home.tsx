@@ -1,12 +1,13 @@
 /**
  * Home — orchestrates Upload → Dashboard flow with week switching
  */
-import { useState } from 'react';
-import UploadPage from './Upload';
-import DashboardPage from './Dashboard';
-import { DashboardData, switchWeek } from '@/lib/excelParser';
+import { lazy, Suspense, useState } from 'react';
+import type { DashboardData } from '@/lib/excelParser';
 import { saveRiskDashboardState } from '@/lib/riskApi';
 import { useAuth } from '@/contexts/AuthContext';
+
+const UploadPage = lazy(() => import('./Upload'));
+const DashboardPage = lazy(() => import('./Dashboard'));
 
 export const LAST_UPLOAD_KEY = 'risks-dashboard:last-upload:v1';
 const DASHBOARD_STORAGE_PREFIXES = ['risks-dashboard:', 'risk-dashboard:'];
@@ -127,8 +128,9 @@ export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'custome
     setSaveStatus(null);
   }
 
-  function handleWeekChange(week: string) {
+  async function handleWeekChange(week: string) {
     if (!data) return;
+    const { switchWeek } = await import('@/lib/excelParser');
     setData(switchWeek(data, week));
   }
 
@@ -139,25 +141,37 @@ export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'custome
 
   if (data) {
     return (
-      <DashboardPage
-        data={data}
-        fileName={fileName}
-        onReset={handleReset}
-        onWeekChange={handleWeekChange}
-        portal={portal}
-        saveStatus={saveStatus}
-      />
+      <Suspense fallback={<PageLoading label="Loading dashboard..." />}>
+        <DashboardPage
+          data={data}
+          fileName={fileName}
+          onReset={handleReset}
+          onWeekChange={handleWeekChange}
+          portal={portal}
+          saveStatus={saveStatus}
+        />
+      </Suspense>
     );
   }
 
   return (
-    <UploadPage
-      onDataLoaded={handleDataLoaded}
-      previousUpload={lastUpload ? { fileName: lastUpload.fileName, savedAt: lastUpload.savedAt, riskCount: lastUpload.data.kpis.totalRisks || lastUpload.data.riskRegister.length } : null}
-      onLoadPrevious={handlePreviousUpload}
-      onClearPrevious={handleClearPreviousUpload}
-      onClearSavedDashboardData={handleClearPreviousUpload}
-      portal={portal}
-    />
+    <Suspense fallback={<PageLoading label="Loading upload..." />}>
+      <UploadPage
+        onDataLoaded={handleDataLoaded}
+        previousUpload={lastUpload ? { fileName: lastUpload.fileName, savedAt: lastUpload.savedAt, riskCount: lastUpload.data.kpis.totalRisks || lastUpload.data.riskRegister.length } : null}
+        onLoadPrevious={handlePreviousUpload}
+        onClearPrevious={handleClearPreviousUpload}
+        onClearSavedDashboardData={handleClearPreviousUpload}
+        portal={portal}
+      />
+    </Suspense>
+  );
+}
+
+function PageLoading({ label }: { label: string }) {
+  return (
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', fontWeight: 900, color: '#0f172a' }}>
+      {label}
+    </div>
   );
 }

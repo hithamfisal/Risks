@@ -42,14 +42,15 @@ export async function fetchCurrentSession(): Promise<AuthSession & { tenant: Ten
   return { ...session, tenant: normalizeTenantIdentity(session.tenant) };
 }
 
-export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+export async function changePassword(currentPassword: string, newPassword: string): Promise<AuthSession & { tenant?: TenantIdentity | null } | void> {
   const response = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
-  await parseResponse<{ ok: boolean }>(response);
+  const session = await parseResponse<{ ok: boolean } & Partial<AuthSession> & { tenant?: TenantIdentity | null }>(response);
+  if (session.user) return { user: session.user, tenant: normalizeTenantIdentity(session.tenant ?? null) };
 }
 
 export type { AuthUser };

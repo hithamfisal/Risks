@@ -18,6 +18,7 @@ const SERVER_ROOT = __dirname;
 const SCHEMA_FILE = path.join(SERVER_ROOT, 'schema.mysql.sql');
 const STORAGE_ROOT = path.resolve(process.env.RISK_STORAGE_DIR || path.join(PROJECT_ROOT, 'server', 'storage'));
 const UPLOAD_ROOT = path.join(STORAGE_ROOT, 'uploads');
+const APP_VERSION = process.env.RISK_APP_VERSION || '1.1.0';
 
 loadLocalEnv(path.join(PROJECT_ROOT, '.env'));
 loadLocalEnv(path.join(SERVER_ROOT, '.env'));
@@ -128,7 +129,15 @@ async function initSchema() {
   for (const statement of splitSqlStatements(sql)) {
     await db.query(statement);
   }
+  await ensureSchemaMigrations(db);
   await seedDefaultUsers();
+}
+
+async function ensureSchemaMigrations(db) {
+  const [mustChangeColumns] = await db.query("SHOW COLUMNS FROM risk_users LIKE 'must_change_password'");
+  if (!mustChangeColumns.length) {
+    await db.query('ALTER TABLE risk_users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active');
+  }
 }
 
 async function seedDefaultUsers() {
@@ -154,7 +163,7 @@ async function seedDefaultUsers() {
   for (const user of defaults) {
     const hash = await bcrypt.hash(user.password, 12);
     await db.query(
-      'INSERT INTO risk_users (username, password_hash, display_name, role_name, is_active) VALUES (?, ?, ?, ?, 1)',
+      'INSERT INTO risk_users (username, password_hash, display_name, role_name, is_active, must_change_password) VALUES (?, ?, ?, ?, 1, 1)',
       [user.username, hash, user.display_name, user.role_name],
     );
   }
@@ -173,6 +182,7 @@ function toPublicUser(row) {
     role: row.role_name,
     role_name: row.role_name,
     is_active: Boolean(row.is_active),
+    must_change_password: Boolean(row.must_change_password),
     failed_attempts: Number(row.failed_attempts || 0),
     locked_until: row.locked_until ? new Date(row.locked_until).toISOString() : null,
     last_login_at: row.last_login_at ? new Date(row.last_login_at).toISOString() : null,
@@ -249,7 +259,18 @@ async function optionalAuth(req, _res, next) {
 
 function requireAuth(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (req.user.must_change_password && !isPasswordChangeAllowed(req)) {
+    return res.status(403).json({ error: 'Password change required before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
+  }
   return next();
+}
+
+function isPasswordChangeAllowed(req) {
+  if (!req.user?.must_change_password) return true;
+  if (req.path === '/api/auth/me' && req.method === 'GET') return true;
+  if (req.path === '/api/auth/logout' && req.method === 'POST') return true;
+  if (req.path === '/api/auth/change-password' && req.method === 'POST') return true;
+  return false;
 }
 
 function hasRole(user, allowed) {
@@ -258,12 +279,18 @@ function hasRole(user, allowed) {
 
 function requireSystemAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (req.user.must_change_password && !isPasswordChangeAllowed(req)) {
+    return res.status(403).json({ error: 'Password change required before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
+  }
   if (!hasRole(req.user, ['system_admin'])) return res.status(403).json({ error: 'System Admin permission required.' });
   return next();
 }
 
 function requireRiskAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (req.user.must_change_password && !isPasswordChangeAllowed(req)) {
+    return res.status(403).json({ error: 'Password change required before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
+  }
   if (!hasRole(req.user, ['system_admin', 'risk_admin'])) return res.status(403).json({ error: 'Risk Admin permission required.' });
   return next();
 }
@@ -339,9 +366,10 @@ async function changePasswordHandler(req, res) {
   }
 
   const hash = await bcrypt.hash(newPassword, 12);
-  await db.query('UPDATE risk_users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', [hash, row.id]);
+  await db.query('UPDATE risk_users SET password_hash = ?, must_change_password = 0, failed_attempts = 0, locked_until = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', [hash, row.id]);
   await audit(req, 'auth.password_change', { id: row.id });
-  return res.json({ ok: true });
+  const [freshRows] = await db.query('SELECT * FROM risk_users WHERE id = ?', [row.id]);
+  return res.json({ ok: true, user: toPublicUser(freshRows[0] || row) });
 }
 
 async function getSettingsMap() {
@@ -409,7 +437,7 @@ async function postAppSettings(req, res) {
 }
 
 async function listUsers(_req, res) {
-  const [rows] = await getPool().query('SELECT id, username, display_name, role_name, is_active, failed_attempts, locked_until, last_login_at, created_at, updated_at FROM risk_users ORDER BY id');
+  const [rows] = await getPool().query('SELECT id, username, display_name, role_name, is_active, must_change_password, failed_attempts, locked_until, last_login_at, created_at, updated_at FROM risk_users ORDER BY id');
   return res.json({ users: rows.map(toPublicUser) });
 }
 
@@ -428,7 +456,7 @@ async function createUser(req, res) {
   if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   const hash = await bcrypt.hash(password, 12);
   try {
-    const [result] = await getPool().query('INSERT INTO risk_users (username, password_hash, display_name, role_name, is_active) VALUES (?, ?, ?, ?, ?)', [username, hash, displayName, roleName, req.body?.is_active === false ? 0 : 1]);
+    const [result] = await getPool().query('INSERT INTO risk_users (username, password_hash, display_name, role_name, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, 1)', [username, hash, displayName, roleName, req.body?.is_active === false ? 0 : 1]);
     await audit(req, 'users.create', { id: result.insertId, username, role_name: roleName });
     const [rows] = await getPool().query('SELECT * FROM risk_users WHERE id = ?', [result.insertId]);
     return res.status(201).json({ user: toPublicUser(rows[0]) });
@@ -463,7 +491,7 @@ async function resetPassword(req, res) {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid user id.' });
   if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   const hash = await bcrypt.hash(password, 12);
-  await getPool().query('UPDATE risk_users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', [hash, id]);
+  await getPool().query('UPDATE risk_users SET password_hash = ?, must_change_password = 1, failed_attempts = 0, locked_until = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', [hash, id]);
   await audit(req, 'users.reset_password', { id });
   return res.json({ ok: true });
 }
@@ -482,6 +510,91 @@ async function getAuditLogs(req, res) {
   const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 500);
   const [rows] = await getPool().query('SELECT * FROM risk_audit_logs ORDER BY created_at DESC LIMIT ?', [limit]);
   return res.json({ audit_logs: rows.map(row => ({ ...row, details: typeof row.details === 'string' ? safeJson(row.details) : row.details })) });
+}
+
+async function getSystemStatus(_req, res) {
+  const db = getPool();
+  const [[userStats]] = await db.query(`
+    SELECT
+      COUNT(*) AS total_users,
+      SUM(is_active = 1) AS active_users,
+      SUM(is_active = 0) AS inactive_users,
+      SUM(must_change_password = 1) AS pending_password_changes,
+      SUM(locked_until IS NOT NULL AND locked_until > UTC_TIMESTAMP()) AS locked_users
+    FROM risk_users
+  `);
+  const [[failedLogins]] = await db.query("SELECT COUNT(*) AS count FROM risk_audit_logs WHERE action = 'auth.login_failed' AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)");
+  const [[lastAudit]] = await db.query('SELECT created_at, action, username, ip_address FROM risk_audit_logs ORDER BY created_at DESC LIMIT 1');
+  return res.json({
+    status: {
+      version: APP_VERSION,
+      database: 'mysql',
+      generated_at: new Date().toISOString(),
+      users: {
+        total: Number(userStats.total_users || 0),
+        active: Number(userStats.active_users || 0),
+        inactive: Number(userStats.inactive_users || 0),
+        pending_password_changes: Number(userStats.pending_password_changes || 0),
+        locked: Number(userStats.locked_users || 0),
+      },
+      security: {
+        failed_logins_24h: Number(failedLogins.count || 0),
+      },
+      last_audit: lastAudit || null,
+    },
+  });
+}
+
+async function getBackup(req, res) {
+  const db = getPool();
+  const { settings } = await getSettingsMap();
+  const [users] = await db.query('SELECT id, username, display_name, role_name, is_active, must_change_password, failed_attempts, locked_until, last_login_at, created_at, updated_at FROM risk_users ORDER BY id');
+  const [auditRows] = await db.query('SELECT id, username, action, details, ip_address, user_agent, created_at FROM risk_audit_logs ORDER BY created_at DESC LIMIT 500');
+  const [dashboardRows] = await db.query('SELECT state_key, state_value, updated_at FROM risk_dashboard_state ORDER BY state_key');
+  await audit(req, 'backup.export', { sections: ['settings', 'users', 'audit_logs', 'dashboard_state'] });
+  return res.json({
+    backup: {
+      version: APP_VERSION,
+      exported_at: new Date().toISOString(),
+      settings,
+      users: users.map(toPublicUser),
+      audit_logs: auditRows.map(row => ({ ...row, details: typeof row.details === 'string' ? safeJson(row.details) : row.details })),
+      dashboard_state: dashboardRows.map(row => ({ key: row.state_key, state: row.state_value ? safeJson(row.state_value) : null, updated_at: row.updated_at })),
+    },
+  });
+}
+
+async function restoreBackup(req, res) {
+  const backup = req.body?.backup && typeof req.body.backup === 'object' ? req.body.backup : req.body;
+  if (!backup || typeof backup !== 'object') return res.status(400).json({ error: 'Backup JSON is required.' });
+  const db = getPool();
+  const restored = { settings: 0, dashboard_state: 0 };
+
+  if (backup.settings && typeof backup.settings === 'object') {
+    for (const [key, value] of Object.entries(backup.settings)) {
+      if (!/^[a-zA-Z0-9_.-]{1,120}$/.test(key)) return res.status(400).json({ error: `Invalid setting key: ${key}` });
+      await saveSetting(key, value);
+      restored.settings += 1;
+    }
+  }
+
+  if (Array.isArray(backup.dashboard_state)) {
+    for (const item of backup.dashboard_state) {
+      const key = String(item?.key || item?.state_key || '');
+      if (!/^[a-zA-Z0-9_.-]{1,120}$/.test(key)) return res.status(400).json({ error: `Invalid dashboard state key: ${key}` });
+      await db.query(
+        'INSERT INTO risk_dashboard_state (state_key, state_value, updated_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE state_value = VALUES(state_value), updated_by = VALUES(updated_by), updated_at = UTC_TIMESTAMP()',
+        [key, JSON.stringify(item.state ?? item.state_value ?? null), Number(req.user.id)],
+      );
+      restored.dashboard_state += 1;
+    }
+  }
+
+  if (!restored.settings && !restored.dashboard_state) {
+    return res.status(400).json({ error: 'Backup has no restorable settings or dashboard state.' });
+  }
+  await audit(req, 'backup.restore', restored);
+  return res.json({ ok: true, restored });
 }
 
 function safeJson(value) {
@@ -663,6 +776,9 @@ async function createApp() {
   app.post('/api/app/users/:id/reset-password', requireSystemAdmin, asyncRoute(resetPassword));
   app.post('/api/app/users/:id/toggle-active', requireSystemAdmin, asyncRoute(toggleActive));
 
+  app.get('/api/app/system-status', requireSystemAdmin, asyncRoute(getSystemStatus));
+  app.get('/api/app/backup', requireSystemAdmin, asyncRoute(getBackup));
+  app.post('/api/app/restore', requireSystemAdmin, asyncRoute(restoreBackup));
   app.get('/api/app/audit-logs', requireSystemAdmin, asyncRoute(getAuditLogs));
   app.get('/api/app/dashboard-state', requireAuth, asyncRoute(getDashboardState));
   app.post('/api/app/dashboard-state', requireRiskAdmin, asyncRoute(postDashboardState));

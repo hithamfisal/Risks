@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS risk_users (
   display_name VARCHAR(160) NOT NULL,
   role_name ENUM('system_admin','risk_admin','viewer') NOT NULL DEFAULT 'viewer',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  must_change_password TINYINT(1) NOT NULL DEFAULT 1,
   failed_attempts INT UNSIGNED NOT NULL DEFAULT 0,
   locked_until DATETIME NULL,
   last_login_at DATETIME NULL,

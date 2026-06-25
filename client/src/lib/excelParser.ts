@@ -40,6 +40,10 @@
 
 import * as XLSX from 'xlsx';
 
+const MAX_WORKBOOK_SHEETS = 30;
+const MAX_WORKBOOK_ROWS_PER_SHEET = 20000;
+const MAX_WORKBOOK_COLUMNS_PER_SHEET = 300;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface WeekData {
@@ -406,11 +410,15 @@ function scoreHeaderRow(headerRow: unknown[]): number {
 }
 
 function locateRiskSheet(wb: XLSX.WorkBook): SheetMatch {
+  if (wb.SheetNames.length > MAX_WORKBOOK_SHEETS) {
+    throw new Error(`UPLOAD_VALIDATION: Workbook has too many sheets. Maximum allowed is ${MAX_WORKBOOK_SHEETS}.`);
+  }
   let best: SheetMatch | null = null;
 
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null }) as unknown[][];
+    validateSheetShape(rows);
     if (rows.length < 2) continue;
 
     for (let r = 0; r < Math.min(30, rows.length); r++) {
@@ -431,10 +439,22 @@ function locateRiskSheet(wb: XLSX.WorkBook): SheetMatch {
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null }) as unknown[][];
+    validateSheetShape(rows);
     if (rows.length >= 2) return { sheetName, rows, headerRowIdx: 0, score: 0 };
   }
 
   throw new Error('UPLOAD_VALIDATION: Workbook contains no readable sheets.');
+}
+
+function validateSheetShape(rows: unknown[][]) {
+  if (rows.length > MAX_WORKBOOK_ROWS_PER_SHEET) {
+    throw new Error(`UPLOAD_VALIDATION: Sheet has too many rows. Maximum allowed is ${MAX_WORKBOOK_ROWS_PER_SHEET.toLocaleString()}.`);
+  }
+  for (const row of rows) {
+    if (Array.isArray(row) && row.length > MAX_WORKBOOK_COLUMNS_PER_SHEET) {
+      throw new Error(`UPLOAD_VALIDATION: Sheet has too many columns. Maximum allowed is ${MAX_WORKBOOK_COLUMNS_PER_SHEET}.`);
+    }
+  }
 }
 
 // ── Period column detection ──────────────────────────────────────────────────
@@ -523,7 +543,7 @@ function detectPeriodColumns(headerRow: unknown[]): WeekData[] {
 
 export function parseExcel(buffer: ArrayBuffer): DashboardData {
   // cellDates:true so Excel date serials become JS Date objects
-  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true, cellFormula: false, bookVBA: false });
 
   // Accept ANY workbook and ANY sheet name — choose the sheet/header row that
   // looks most like a risk register rather than relying on a fixed sheet name.
