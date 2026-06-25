@@ -9,6 +9,7 @@ import {
   Mail,
   Palette,
   Phone,
+  RotateCcw,
   Save,
   ShieldCheck,
   UploadCloud,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { fetchTenantIdentity, listTenantIdentities, patchTenantIdentity, uploadTenantImage, type TenantIdentity } from '@/lib/tenantIdentity';
+import { DEFAULT_TENANT_IDENTITY, fetchTenantIdentity, listTenantIdentities, patchTenantIdentity, uploadTenantImage, type TenantIdentity } from '@/lib/tenantIdentity';
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
@@ -58,6 +59,7 @@ export default function CompanyIdentityPage() {
   const [previews, setPreviews] = useState<PreviewImages>({ logo: '', cover: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -182,6 +184,39 @@ export default function CompanyIdentityPage() {
     }
   }
 
+  async function restoreDefaults() {
+    if (!form || restoring) return;
+    const confirmed = window.confirm('Restore the management identity settings to the default values? This clears the saved logo, cover image, colors, contact details, and description.');
+    if (!confirmed) return;
+
+    setRestoring(true);
+    setError('');
+    setSuccess('');
+    try {
+      const tenantIdForSuperAdmin = isSuperAdmin ? activeTenant : undefined;
+      const next = await patchTenantIdentity({
+        tenant_id: tenantIdForSuperAdmin,
+        company_name: DEFAULT_TENANT_IDENTITY.company_name,
+        logo_url: DEFAULT_TENANT_IDENTITY.logo_url,
+        cover_image_url: DEFAULT_TENANT_IDENTITY.cover_image_url,
+        primary_color: DEFAULT_TENANT_IDENTITY.primary_color,
+        secondary_color: DEFAULT_TENANT_IDENTITY.secondary_color,
+        whatsapp_number: DEFAULT_TENANT_IDENTITY.whatsapp_number,
+        support_email: DEFAULT_TENANT_IDENTITY.support_email,
+        description: DEFAULT_TENANT_IDENTITY.description,
+      });
+
+      setForm(next);
+      setPending({ logo: null, cover: null });
+      setPreviews({ logo: next.logo_url || '', cover: next.cover_image_url || '' });
+      setSuccess('Management identity settings were restored to the default values.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to restore default settings.');
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   const companyName = form?.company_name || 'Company Identity';
 
   return (
@@ -209,7 +244,10 @@ export default function CompanyIdentityPage() {
           <div style={{ fontSize: 17, fontWeight: 950, color: 'white', lineHeight: 1.1 }}>{companyName}</div>
           <div style={{ fontSize: 11, fontWeight: 750, color: 'rgba(255,255,255,.58)' }}>Company Identity Settings</div>
         </div>
-        <button onClick={saveIdentity} disabled={saving || loading || !form} style={{ height: 38, borderRadius: 999, border: 'none', background: saving ? 'rgba(148,163,184,.5)' : 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 900, fontSize: 13, padding: '0 18px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: saving ? 'not-allowed' : 'pointer' }}>
+        <button onClick={restoreDefaults} disabled={restoring || saving || loading || !form} style={{ height: 38, borderRadius: 999, border: '1px solid rgba(255,255,255,.16)', background: 'rgba(255,255,255,.08)', color: 'white', fontWeight: 900, fontSize: 13, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: restoring || saving || loading || !form ? 'not-allowed' : 'pointer' }}>
+          <RotateCcw size={16} /> {restoring ? 'Restoring...' : 'Restore Defaults'}
+        </button>
+        <button onClick={saveIdentity} disabled={saving || restoring || loading || !form} style={{ height: 38, borderRadius: 999, border: 'none', background: saving ? 'rgba(148,163,184,.5)' : 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 900, fontSize: 13, padding: '0 18px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: saving || restoring || loading || !form ? 'not-allowed' : 'pointer' }}>
           <Save size={16} /> {saving ? 'Saving...' : 'Save Identity'}
         </button>
         <button onClick={logout} style={{ height: 38, borderRadius: 999, border: '1px solid rgba(255,255,255,.16)', background: 'rgba(255,255,255,.08)', color: 'white', fontWeight: 900, fontSize: 13, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
