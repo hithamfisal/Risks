@@ -1,4 +1,4 @@
-# TNOC Risk Dashboard — Design Ideas
+# Risks Dashboard — Design Ideas
 
 <response>
 <text>

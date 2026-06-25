@@ -112,3 +112,8 @@ temp/
 package-lock.json
 .yarn-cache/
 *.map
+
+# Tenant identity uploaded files and local JSON storage
+tenant-storage/
+server/data/
+server/storage/

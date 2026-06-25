@@ -26,6 +26,21 @@ export default defineConfig({
     port: 3000,
     strictPort: false,
     host: true,
+    proxy: {
+      // During local development, the React app runs on port 3000
+      // while the Risk MySQL API runs on port 4000.
+      // This proxy prevents /api/auth/login from returning 404 from Vite.
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/uploads': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
     fs: {
       strict: false,
     },

@@ -172,6 +172,58 @@ function safeStr(v: unknown): string {
   return String(v).trim();
 }
 
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function normalizeDateObjectForDisplay(date: Date): Date {
+  const d = new Date(date.getTime());
+  // Excel dates coming through XLSX can occasionally arrive a few seconds before
+  // midnight because of serial-date precision/timezone conversion. Round those
+  // values forward so 31/12/2025 does not display as Tue Dec 30 ... 23:59.
+  if (d.getHours() === 23 && d.getMinutes() >= 55) d.setMinutes(d.getMinutes() + 10);
+  return d;
+}
+
+function formatDateForDisplay(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '';
+
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    const d = normalizeDateObjectForDisplay(v);
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+  }
+
+  if (typeof v === 'number' && v > 36526 && v < 50000) {
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    if (!isNaN(d.getTime())) return `${pad2(d.getUTCDate())}/${pad2(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+  }
+
+  const text = safeStr(v);
+  if (!text) return '';
+
+  const quarter = normalizeQuarterValue(text);
+  if (/^Q[1-4]\s+\d{4}$/i.test(quarter)) return quarter;
+
+  const dmy = text.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (dmy) {
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]);
+    const year = dmy[3].length === 2 ? Number(`20${dmy[3]}`) : Number(dmy[3]);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 1900) {
+      return `${pad2(day)}/${pad2(month)}/${year}`;
+    }
+  }
+
+  const parsed = Date.parse(text);
+  if (!Number.isNaN(parsed)) {
+    const d = normalizeDateObjectForDisplay(new Date(parsed));
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+  }
+
+  return text;
+}
+
 function normalizeQuarterValue(v: unknown): string {
   const text = safeStr(v);
   if (!text) return '';
@@ -672,7 +724,7 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       const ownerValue = COL_OWNER >= 0 ? safeStr(row[COL_OWNER]) : '';
       const ratingValue = COL_RATING >= 0 ? (safeStr(row[COL_RATING]) || deriveRating(safeNum(row[COL_SCORE]))) : deriveRating(safeNum(row[COL_SCORE]));
       const identificationValue = COL_IDENTIFICATION_DATE >= 0 ? normalizeQuarterValue(row[COL_IDENTIFICATION_DATE]) : '';
-      const closingValue = COL_CLOSING_DATE >= 0 ? safeStr(row[COL_CLOSING_DATE]) : '';
+      const closingValue = COL_CLOSING_DATE >= 0 ? formatDateForDisplay(row[COL_CLOSING_DATE]) : '';
       const progressStatusValue = COL_PROGRESS_STATUS >= 0 ? safeStr(row[COL_PROGRESS_STATUS]) : '';
       const categoryValue = COL_CATEGORY >= 0 ? safeStr(row[COL_CATEGORY]) : '';
       const riskTypeValue = COL_RISK_TYPE >= 0 ? safeStr(row[COL_RISK_TYPE]) : '';
@@ -828,7 +880,13 @@ export function parseExcel(buffer: ArrayBuffer): DashboardData {
       const qEndDate = new Date(y, qEndMonth, 1); // first day after quarter ends
       return qEndDate <= currentDate;
     }
-    // Try parsing as a real date
+    // Try parsing as a real date in dashboard display format dd/mm/yyyy
+    const displayDate = formatDateForDisplay(cd);
+    const dmy = displayDate.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmy) {
+      const d = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 23, 59, 59);
+      return d < currentDate;
+    }
     const d = new Date(cd);
     if (!isNaN(d.getTime())) return d < currentDate;
     return false;

@@ -9,10 +9,12 @@ import {
   Upload, Printer, TrendingUp, TrendingDown, Minus, Filter, X, BarChart2,
   ChevronDown, ChevronRight, Home, ImageDown, FileSpreadsheet, Search,
   RotateCcw, Download, Eye, EyeOff, Moon, Sun,
-  AlertTriangle, Activity, Layers, Target,
+  AlertTriangle, Activity, Layers, Target, LogOut,
 } from 'lucide-react';
 import { DashboardData, getScoreColor, getRatingColor, type RiskRow } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useTenantIdentity } from '@/hooks/useTenantIdentity';
+import { useAuth } from '@/contexts/AuthContext';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const ZONE_COLORS: Record<string, string> = {
@@ -149,7 +151,7 @@ function ProgressGauge({ score, palette }: { score: number; palette: ThemePalett
 
 function ScoreBadge({ score }: { score: number }) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 34, height: 22, padding: '0 8px', borderRadius: 999, background: getScoreColor(score), color: 'white', fontWeight: 900, fontSize: 12, fontFamily: 'DM Sans, sans-serif' }}>{score}</span>
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 28, height: 20, padding: '0 6px', borderRadius: 999, background: getScoreColor(score), color: 'white', fontWeight: 900, fontSize: 10.5, fontFamily: 'DM Sans, sans-serif' }}>{score}</span>
   );
 }
 
@@ -267,23 +269,26 @@ function quarterTrendMonthLabels(periodLabels: string[], orderedWeeks: { label: 
 
 function getDateValue(value: string): number | null {
   if (!value) return null;
+  const text = String(value).trim();
+  if (!text) return null;
 
   // 1. Quarter strings: 2025 Q1, Q1 2025, 2025-Q2, q3/2026, etc.
   //    Q1 → Mar 31 | Q2 → Jun 30 | Q3 → Sep 30 | Q4 → Dec 31
-  const quarterPeriod = parseQuarterPeriod(value);
+  const quarterPeriod = parseQuarterPeriod(text);
   if (quarterPeriod) return quarterPeriod.endMs;
 
-  // 2. Standard ISO / browser-parseable strings (e.g. "2026-06-01", "June 2026", "01 Jan 2026")
-  const parsed = Date.parse(value);
-  if (!Number.isNaN(parsed)) return parsed;
-
-  // 3. dd/mm/yyyy or dd-mm-yyyy (European format)
-  const dmyMatch = value.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  // 2. dd/mm/yyyy or dd-mm-yyyy (European format). This must come before
+  // Date.parse because JavaScript may read 01/05/2026 as Jan 5 instead of 1 May.
+  const dmyMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
   if (dmyMatch) {
     const [, d, m, y] = dmyMatch;
     const year = y.length === 2 ? Number(`20${y}`) : Number(y);
-    return new Date(year, Number(m) - 1, Number(d)).getTime();
+    return new Date(year, Number(m) - 1, Number(d), 23, 59, 59).getTime();
   }
+
+  // 3. Standard ISO / browser-parseable strings, including full JS Date strings.
+  const parsed = Date.parse(text);
+  if (!Number.isNaN(parsed)) return parsed;
 
   // 4. Month-name formats: "Jan 2026", "January 2026", "2026 Jan"
   const monthNames: Record<string, number> = {
@@ -292,20 +297,30 @@ function getDateValue(value: string): number | null {
     january: 0, february: 1, march: 2, april: 3, june: 5,
     july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
   };
-  const monthYearMatch = value.match(/([A-Za-z]+)[\s,\-]+(\d{4})|(\d{4})[\s,\-]+([A-Za-z]+)/);
+  const monthYearMatch = text.match(/([A-Za-z]+)[\s,\-]+(\d{4})|(\d{4})[\s,\-]+([A-Za-z]+)/);
   if (monthYearMatch) {
     const monthStr = (monthYearMatch[1] || monthYearMatch[4] || '').toLowerCase();
     const yearStr  = monthYearMatch[2] || monthYearMatch[3];
     const month = monthNames[monthStr];
     if (month !== undefined && yearStr) {
-      // Use last day of that month
       const yr = Number(yearStr);
       const lastDay = new Date(yr, month + 1, 0).getDate();
-      return new Date(yr, month, lastDay).getTime();
+      return new Date(yr, month, lastDay, 23, 59, 59).getTime();
     }
   }
 
   return null;
+}
+
+function formatDisplayDate(value?: string | null): string {
+  if (!value) return '–';
+  const text = String(value).trim();
+  if (!text) return '–';
+  if (/^Q[1-4]\s+\d{4}$/i.test(text)) return text.toUpperCase();
+  const ms = getDateValue(text);
+  if (ms === null) return text;
+  const d = new Date(ms);
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
 function normalise(text: string) {
@@ -816,9 +831,10 @@ interface Props {
   fileName: string;
   onReset: () => void;
   onWeekChange: (week: string) => void;
+  portal?: 'admin' | 'customer';
 }
 
-export default function DashboardPage({ data, fileName, onReset, onWeekChange }: Props) {
+export default function DashboardPage({ data, fileName, onReset, onWeekChange, portal = 'admin' }: Props) {
   const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel, residualData, overdueActions, kriData, taxonomyData, velocityData, filterOptions } = data;
 
   // Normalize target KPI math at the display layer as a safety guard.
@@ -909,9 +925,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
   const taxonomyRef = useRef<HTMLDivElement>(null);
 
   const { theme, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
+  const { tenant: companyIdentity } = useTenantIdentity();
   const isDark = theme === 'dark';
+  const isAdminPortal = portal === 'admin';
   const palette = useMemo(() => makePalette(isDark), [isDark]);
-  const themeBg = isDark ? '/assets/dark.png' : '/assets/light.png';
+  const themeBg = companyIdentity.cover_image_url || (isDark ? '/assets/dark.png' : '/assets/light.png');
   const bgForExport = isDark ? '#061630' : '#F8FBFF';
 
   useEffect(() => setActiveRisk(data.selectedRisk), [data.selectedRisk, data.selectedWeek]);
@@ -1260,7 +1279,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
       Score: r.score,
       Rating: r.rating,
       'Identification Date': r.identificationDate,
-      'Closing Date': r.closingDate,
+      'Closing Date': formatDisplayDate(r.closingDate),
       'Progress Status': r.progressStatus,
       'Current %': r.currentPct,
       'Before %': r.beforePct,
@@ -1405,7 +1424,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
     .map(r => ({
       riskTitle: r.title,
       owner: r.owner || '–',
-      closingDate: r.closingDate || '–',
+      closingDate: formatDisplayDate(r.closingDate),
       progressStatus: r.progressStatus || '–',
       currentPct: r.currentPct || 0,
     })), [filteredRisks]);
@@ -1514,24 +1533,37 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           boxShadow: '0 2px 16px rgba(0,0,0,0.45)',
           flexShrink: 0,
         }}>
-          {/* SVG logo block — only icon shown */}
-          <div style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)' }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, #0078FF, #00AEEF)', display: 'grid', placeItems: 'center' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          {/* Tenant logo block — uploaded per tenant_id */}
+          <a href={isAdminPortal ? "/admin/company-identity" : "/customer"} title={isAdminPortal ? "Company Identity Settings" : "Customer Portal"} style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)', textDecoration: 'none' }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: companyIdentity.logo_url ? 'rgba(255,255,255,0.96)' : `linear-gradient(135deg, ${companyIdentity.primary_color || '#0078FF'}, ${companyIdentity.secondary_color || '#00AEEF'})`, display: 'grid', placeItems: 'center', overflow: 'hidden', boxShadow: '0 8px 22px rgba(0,0,0,.22)' }}>
+              {companyIdentity.logo_url ? (
+                <img src={companyIdentity.logo_url} alt={`${companyIdentity.company_name || 'Company'} logo`} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 3 }} />
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              )}
             </div>
-          </div>
+          </a>
 
           {/* Title + executive risk posture badge */}
           <div style={{ flex: 1, padding: '0 20px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>ENTERPRISE RISK MANAGEMENT DASHBOARD</div>
-              <div style={{ fontSize: 10, fontWeight: 750, color: 'rgba(255,255,255,.56)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Snapshot: {identificationFilterActive ? `${selectedIdentificationSnapshotPeriod} → ${selectedSnapshotMonth}` : selectedSnapshotMonth || selectedWeek || period} · Trend: {selectedMonthSummary}</div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{companyIdentity.company_name || 'ENTERPRISE RISK MANAGEMENT DASHBOARD'}</div>
+              <div style={{ fontSize: 10, fontWeight: 750, color: 'rgba(255,255,255,.56)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Enterprise Risk Management Dashboard · Snapshot: {identificationFilterActive ? `${selectedIdentificationSnapshotPeriod} → ${selectedSnapshotMonth}` : selectedSnapshotMonth || selectedWeek || period} · Trend: {selectedMonthSummary}</div>
             </div>
             <span title="Overall risk rating from filtered dataset" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, borderRadius: 999, padding: '0 10px', background: `${overallRiskColor}22`, border: `1px solid ${overallRiskColor}`, color: overallRiskColor, fontSize: 10, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 }}>
               <AlertTriangle size={12} /> Overall Risk Rating: {overallRiskRating}
             </span>
           </div>
 
+
+          {isAdminPortal ? (
+            <>
+              <a href="/admin" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.8)', fontWeight: 850, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 8, textDecoration: 'none', flexShrink: 0 }}><Home size={12} />Admin</a>
+              <a href="/admin/company-identity" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.8)', fontWeight: 850, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 8, textDecoration: 'none', flexShrink: 0 }}><Layers size={12} />Identity</a>
+            </>
+          ) : (
+            <a href="/customer" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.8)', fontWeight: 850, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 8, textDecoration: 'none', flexShrink: 0 }}><Home size={12} />Customer</a>
+          )}
 
           {/* Theme toggle */}
           <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: 2, gap: 0, flexShrink: 0, height: 30, marginRight: 12 }}>
@@ -1543,11 +1575,12 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
           <button onClick={handlePrint} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: 'none', background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', padding: '0 14px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 6 }}><Printer size={12} />PDF</button>
           <button onClick={() => exportElementAsPNG(dashboardRef, 'Risk_Full_Dashboard.png', bgForExport)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: 'none', background: 'linear-gradient(135deg, #06b6d4 0%, #2563eb 100%)', color: 'white', fontWeight: 800, fontSize: 10, cursor: 'pointer', padding: '0 14px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 6 }}><ImageDown size={12} />PNG</button>
           <button onClick={onReset} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.75)', fontWeight: 800, fontSize: 10, cursor: 'pointer', padding: '0 14px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 6 }}><Upload size={12} />New File</button>
+          <button onClick={logout} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.75)', fontWeight: 800, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 6 }}><LogOut size={12} />Logout</button>
 
           {/* User avatar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 4 }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', display: 'grid', placeItems: 'center', color: 'white', fontSize: 12, fontWeight: 900, fontFamily: 'DM Sans, sans-serif', flexShrink: 0 }}>U</div>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.75)', whiteSpace: 'nowrap' }}>User Name</span>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', display: 'grid', placeItems: 'center', color: 'white', fontSize: 12, fontWeight: 900, fontFamily: 'DM Sans, sans-serif', flexShrink: 0 }}>{(user?.name || 'U').slice(0, 1).toUpperCase()}</div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.75)', whiteSpace: 'nowrap' }}>{user?.name || 'User'}</span>
           </div>
         </header>
 
@@ -1692,7 +1725,6 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                   color={card.color}
                   icon={card.icon}
                   sub={card.sub}
-                  isPercent={Boolean((card as { isPercent?: boolean }).isPercent)}
                   selectedWeek={selectedWeek}
                   index={i}
                 />
@@ -2086,10 +2118,22 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
             </div>
 
             <div id="risk-table-wrapper" style={{ overflow: 'hidden', borderRadius: 14, border: `1px solid ${palette.border}`, marginBottom: 0 }}>
-              <table className="risk-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 11 }}>
+              <table className="risk-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0, fontSize: 10.5 }}>
+                <colgroup>
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '33%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '5%' }} />
+                  <col style={{ width: '6%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '6%' }} />
+                  <col style={{ width: '4%' }} />
+                  <col style={{ width: '4%' }} />
+                  <col style={{ width: '4%' }} />
+                </colgroup>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
                   <tr style={{ background: palette.tableHead, color: 'white' }}>
-                    {['Risk Title', 'Mitigation', 'Risk Owner', 'Score', 'Rating', 'Closing Date', 'Trend', 'Current %', 'Before %', 'Change'].map(h => <th key={h} style={{ padding: '9px 9px', textAlign: h.includes('%') || h === 'Score' || h === 'Trend' || h === 'Change' ? 'center' : 'left', fontFamily: 'DM Sans, sans-serif', fontWeight: 900, fontSize: 10, whiteSpace: 'nowrap', borderRight: '1px solid rgba(255,255,255,.10)' }}>{h}</th>)}
+                    {['Risk Title', 'Mitigation', 'Risk Owner', 'Score', 'Rating', 'Closing Date', 'Trend', 'Current', 'Before', 'Change'].map(h => <th key={h} style={{ padding: h === 'Mitigation' ? '7px 8px' : '7px 5px', textAlign: ['Score', 'Rating', 'Closing Date', 'Trend', 'Current', 'Before', 'Change'].includes(h) ? 'center' : 'left', fontFamily: 'DM Sans, sans-serif', fontWeight: 900, fontSize: 9.2, whiteSpace: 'normal', lineHeight: 1.12, borderRight: '1px solid rgba(255,255,255,.10)' }}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -2100,15 +2144,15 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     const textColor = isActive || isHighScore ? 'white' : palette.text;
                     return (
                       <tr key={row.id} onClick={() => setActiveRisk(row)} style={{ background: rowBg, cursor: 'pointer' }} onMouseEnter={e => { if (!isActive && !isHighScore) e.currentTarget.style.background = palette.tableHover; }} onMouseLeave={e => { if (!isActive && !isHighScore) e.currentTarget.style.background = i % 2 === 0 ? palette.tableStripe : palette.cardSolid; }}>
-                        <td style={tableTd(textColor, palette)}><div style={{ maxWidth: 210, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isHighScore ? 900 : 700 }} title={row.title}>{row.title}</div></td>
-                        <td style={tableTd(textColor, palette)}><div style={{ maxWidth: 310, maxHeight: 40, overflow: 'hidden', lineHeight: 1.35, fontSize: 10 }} title={row.mitigation}>{row.mitigation}</div></td>
+                        <td style={tableTd(textColor, palette)}><div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'normal', lineHeight: 1.25, fontWeight: isHighScore ? 900 : 700 }} title={row.title}>{row.title}</div></td>
+                        <td style={{ ...tableTd(textColor, palette), padding: '6px 8px' }}><div style={{ maxHeight: 54, overflow: 'hidden', lineHeight: 1.28, fontSize: 10, whiteSpace: 'normal' }} title={row.mitigation}>{row.mitigation}</div></td>
                         <td style={tableTd(textColor, palette)}>{row.owner || '–'}</td>
                         <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}><ScoreBadge score={row.score} /></td>
-                        <td style={{ ...tableTd(isActive || isHighScore ? 'white' : getRatingColor(row.rating), palette), fontWeight: 900 }}>{row.rating}</td>
-                        <td style={tableTd(textColor, palette)}>{row.closingDate || '–'}</td>
+                        <td style={{ ...tableTd(isActive || isHighScore ? 'white' : getRatingColor(row.rating), palette), textAlign: 'center', fontWeight: 900, fontSize: 9.5, lineHeight: 1.1 }}>{row.rating}</td>
+                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontSize: 10 }}>{formatDisplayDate(row.closingDate)}</td>
                         <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}>{weeks?.length > 1 ? <Sparkline weekProgress={row.weekProgress} weeks={weeks} /> : <span style={{ color: palette.muted }}>–</span>}</td>
-                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900 }}>{row.currentPct > 0 ? `${row.currentPct}%` : '–'}</td>
-                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900 }}>{row.beforePct > 0 ? `${row.beforePct}%` : '–'}</td>
+                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900, fontSize: 10 }}>{row.currentPct > 0 ? `${row.currentPct}%` : '–'}</td>
+                        <td style={{ ...tableTd(textColor, palette), textAlign: 'center', fontWeight: 900, fontSize: 10 }}>{row.beforePct > 0 ? `${row.beforePct}%` : '–'}</td>
                         <td style={{ ...tableTd(textColor, palette), textAlign: 'center' }}><ChangeIndicator dev={row.developmentPct} /></td>
                       </tr>
                     );
@@ -2151,7 +2195,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                     <p style={{ whiteSpace: 'pre-line', fontSize: 12, lineHeight: 1.6, color: palette.muted, marginTop: 8 }}>{activeRisk.mitigation || 'No mitigation details available.'}</p>
                     <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
                       <div style={miniMetric(palette)}><span>Owner</span><strong>{activeRisk.owner || '–'}</strong></div>
-                      <div style={miniMetric(palette)}><span>Closing Date</span><strong>{activeRisk.closingDate || '–'}</strong></div>
+                      <div style={miniMetric(palette)}><span>Closing Date</span><strong>{formatDisplayDate(activeRisk.closingDate)}</strong></div>
                       <div style={miniMetric(palette)}><span>Status</span><strong>{activeRisk.progressStatus || '–'}</strong></div>
                     </div>
                     {weeks?.length > 1 && <div style={{ marginTop: 12, padding: 10, borderRadius: 12, background: palette.cardSolid, border: `1px solid ${palette.border}` }}>
@@ -2277,7 +2321,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                                       { label: 'Score', value: r.score },
                                       { label: 'Likelihood', value: r.likelihood },
                                       { label: 'Impact', value: r.impact },
-                                      { label: 'Closing Date', value: r.closingDate || '–' },
+                                      { label: 'Closing Date', value: formatDisplayDate(r.closingDate) },
                                       { label: 'Status', value: r.progressStatus || '–' },
                                       { label: 'Sub-Category', value: r.subCategory || '–' },
                                     ].map(m => (
@@ -2445,7 +2489,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                           </div>
                         </td>
                         {/* Target (closing date) */}
-                        <td style={{ ...tableTd(palette.muted, palette), whiteSpace: 'nowrap', fontWeight: 700 }}>{risk.closingDate || '–'}</td>
+                        <td style={{ ...tableTd(palette.muted, palette), whiteSpace: 'nowrap', fontWeight: 700, textAlign: 'center' }}>{formatDisplayDate(risk.closingDate)}</td>
                       </tr>
                     );
                   })}
@@ -2518,7 +2562,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange }:
                           <td style={{ padding: '8px 10px', color: SE.red, fontWeight: 900 }}>{overdueStartIndex + i + 1}</td>
                           <td style={{ padding: '8px 10px', color: palette.text, fontWeight: 800 }}>{item.riskTitle}</td>
                           <td style={{ padding: '8px 10px', color: SE.cyan }}>{item.owner}</td>
-                          <td style={{ padding: '8px 10px', color: SE.orange, fontWeight: 800 }}>{item.closingDate}</td>
+                          <td style={{ padding: '8px 10px', color: SE.orange, fontWeight: 800, textAlign: 'center' }}>{formatDisplayDate(item.closingDate)}</td>
                           <td style={{ padding: '8px 10px' }}>
                             <span style={{ background: item.progressStatus?.toLowerCase().includes('not') ? 'rgba(192,57,43,.15)' : 'rgba(230,126,34,.15)', color: item.progressStatus?.toLowerCase().includes('not') ? SE.red : SE.orange, border: `1px solid ${item.progressStatus?.toLowerCase().includes('not') ? SE.red : SE.orange}`, borderRadius: 6, padding: '2px 8px', fontWeight: 800, fontSize: 10 }}>{item.progressStatus}</span>
                           </td>
@@ -2761,7 +2805,7 @@ function pillCircle(color: string): CSSProperties {
 }
 
 function tableTd(color: string, palette: ThemePalette): CSSProperties {
-  return { padding: '7px 9px', color, borderBottom: `1px solid ${palette.border}`, borderRight: `1px solid ${palette.border}`, whiteSpace: 'nowrap', verticalAlign: 'middle' };
+  return { padding: '6px 6px', color, borderBottom: `1px solid ${palette.border}`, borderRight: `1px solid ${palette.border}`, whiteSpace: 'normal', verticalAlign: 'middle', overflowWrap: 'anywhere' };
 }
 
 // ─── 5×5 Risk Heat Map ───────────────────────────────────────────────────────

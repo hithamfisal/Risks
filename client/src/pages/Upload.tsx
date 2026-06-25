@@ -1,12 +1,14 @@
 /**
- * Upload page — entry point for the TNOC Risk Dashboard
+ * Upload page — entry point for the Risks Dashboard
  * Design: Saudi Energy themed light/dark landing screen with branded logos
  */
 
 import { useState, useRef, DragEvent } from 'react';
-import { Upload, FileSpreadsheet, ArrowRight, AlertCircle, Clock3, Trash2, Sun, Moon } from 'lucide-react';
+import { Link } from 'wouter';
+import { Upload, FileSpreadsheet, ArrowRight, AlertCircle, Clock3, Trash2, Sun, Moon, UserRoundCog, Building2 } from 'lucide-react';
 import { parseExcel, DashboardData } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useTenantIdentity } from '@/hooks/useTenantIdentity';
 
 interface PreviousUploadInfo {
   fileName: string;
@@ -20,15 +22,17 @@ interface UploadPageProps {
   onLoadPrevious?: () => void;
   onClearPrevious?: () => void | Promise<void>;
   onClearSavedDashboardData?: () => void | Promise<void>;
+  portal?: 'admin' | 'customer';
 }
 
-export default function UploadPage({ onDataLoaded, previousUpload, onLoadPrevious, onClearPrevious, onClearSavedDashboardData }: UploadPageProps) {
+export default function UploadPage({ onDataLoaded, previousUpload, onLoadPrevious, onClearPrevious, onClearSavedDashboardData, portal = 'admin' }: UploadPageProps) {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const { theme, toggleTheme } = useTheme();
+  const { tenant: companyIdentity } = useTenantIdentity();
   const isDark = theme === 'dark';
 
   const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024;
@@ -120,7 +124,7 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
     }
   }
 
-  const pageBg = isDark ? '/assets/dark.png' : '/assets/light.png';
+  const pageBg = companyIdentity.cover_image_url || (isDark ? '/assets/dark.png' : '/assets/light.png');
   const previousDate = previousUpload?.savedAt
     ? new Date(previousUpload.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
     : '';
@@ -158,23 +162,35 @@ export default function UploadPage({ onDataLoaded, previousUpload, onLoadPreviou
         <div style={{ position: 'absolute', left: '22%', top: '50%', transform: 'translate(-50%,-50%)', width: 320, height: 160, background: 'radial-gradient(ellipse, rgba(0,144,255,0.22) 0%, transparent 65%)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', right: '22%', top: '50%', transform: 'translate(50%,-50%)', width: 280, height: 140, background: 'radial-gradient(ellipse, rgba(192,57,43,0.18) 0%, transparent 65%)', pointerEvents: 'none' }} />
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
-          <div style={{ width: 52, height: 52, borderRadius: 14, background: 'linear-gradient(135deg, #0078FF, #00AEEF)', display: 'grid', placeItems: 'center', boxShadow: '0 14px 36px rgba(0,120,255,0.32)' }}>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: companyIdentity.logo_url ? 'rgba(255,255,255,.96)' : `linear-gradient(135deg, ${companyIdentity.primary_color || '#0078FF'}, ${companyIdentity.secondary_color || '#00AEEF'})`, display: 'grid', placeItems: 'center', boxShadow: '0 14px 36px rgba(0,120,255,0.32)', overflow: 'hidden' }}>
+            {companyIdentity.logo_url ? (
+              <img src={companyIdentity.logo_url} alt={`${companyIdentity.company_name || 'Company'} logo`} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 5 }} />
+            ) : (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            )}
           </div>
         </div>
         <div style={{ flex: 1, textAlign: 'center', zIndex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>Risk Management Dashboard</div>
-          <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Telecom Network Operations Center</div>
+          <div style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,144,255,0.4)' }}>{companyIdentity.company_name || 'Risk Management Dashboard'}</div>
+          <div style={{ fontSize: 13, color: 'rgba(0,206,209,0.9)', fontWeight: 600, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Risk Management Dashboard · Telecom Network Operations Center</div>
         </div>
         <div style={{ flex: '0 0 auto', width: 52, height: 52, zIndex: 1 }} />
       </div>
 
       {/* Thin control bar below banner */}
       <div style={{ background: isDark ? 'rgba(5,18,43,0.95)' : 'rgba(255,255,255,0.96)', borderBottom: isDark ? '1px solid rgba(125,211,252,0.18)' : '1px solid rgba(31,56,100,0.10)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '6px 24px', gap: 8 }}>
+        {portal === 'admin' ? (
+          <>
+            <Link href="/admin" style={{ height: 30, borderRadius: 999, border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', color: isDark ? '#7DD3FC' : '#073266', fontWeight: 900, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 12px', textDecoration: 'none' }}><UserRoundCog size={13} />Admin Portal</Link>
+            <Link href="/admin/company-identity" style={{ height: 30, borderRadius: 999, border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', color: isDark ? '#7DD3FC' : '#073266', fontWeight: 900, fontSize: 11, display: 'inline-flex', alignItems: 'center', padding: '0 12px', textDecoration: 'none' }}>Company Identity</Link>
+          </>
+        ) : (
+          <Link href="/customer" style={{ height: 30, borderRadius: 999, border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', color: isDark ? '#7DD3FC' : '#073266', fontWeight: 900, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 12px', textDecoration: 'none' }}><Building2 size={13} />Customer Portal</Link>
+        )}
         {/* Segmented pill theme toggle */}
         <div style={{ display: 'inline-flex', alignItems: 'center', background: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)', border: isDark ? '1px solid rgba(125,211,252,0.28)' : '1px solid rgba(37,99,235,0.18)', borderRadius: 999, padding: 2, gap: 0, backdropFilter: 'blur(8px)', height: 30 }}>
           <button

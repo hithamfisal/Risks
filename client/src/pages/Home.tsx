@@ -6,8 +6,8 @@ import UploadPage from './Upload';
 import DashboardPage from './Dashboard';
 import { DashboardData, switchWeek } from '@/lib/excelParser';
 
-export const LAST_UPLOAD_KEY = 'tnoc-risk-dashboard:last-upload:v1';
-const DASHBOARD_STORAGE_PREFIXES = ['tnoc-risk-dashboard:', 'risk-dashboard:', 'risks-dashboard:'];
+export const LAST_UPLOAD_KEY = 'risks-dashboard:last-upload:v1';
+const DASHBOARD_STORAGE_PREFIXES = ['risks-dashboard:', 'risk-dashboard:'];
 
 type LastUploadPayload = {
   data: DashboardData;
@@ -43,7 +43,7 @@ async function clearSavedDashboardData() {
       await Promise.all(
         databases
           .map(db => db.name || '')
-          .filter(name => DASHBOARD_STORAGE_PREFIXES.some(prefix => name.startsWith(prefix)) || /risk|tnoc|dashboard/i.test(name))
+          .filter(name => DASHBOARD_STORAGE_PREFIXES.some(prefix => name.startsWith(prefix)) || /risk|risks|dashboard/i.test(name))
           .map(name => new Promise<void>(resolve => {
             const request = window.indexedDB.deleteDatabase(name);
             request.onsuccess = () => resolve();
@@ -70,7 +70,7 @@ function readLastUpload(): LastUploadPayload | null {
   }
 }
 
-export default function Home() {
+export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'customer' }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [fileName, setFileName] = useState('');
   const [lastUpload, setLastUpload] = useState<LastUploadPayload | null>(() => readLastUpload());
@@ -121,6 +121,7 @@ export default function Home() {
         fileName={fileName}
         onReset={handleReset}
         onWeekChange={handleWeekChange}
+        portal={portal}
       />
     );
   }
@@ -132,6 +133,7 @@ export default function Home() {
       onLoadPrevious={handlePreviousUpload}
       onClearPrevious={handleClearPreviousUpload}
       onClearSavedDashboardData={handleClearPreviousUpload}
+      portal={portal}
     />
   );
 }
