@@ -5,6 +5,8 @@ import { useState } from 'react';
 import UploadPage from './Upload';
 import DashboardPage from './Dashboard';
 import { DashboardData, switchWeek } from '@/lib/excelParser';
+import { saveRiskDashboardState } from '@/lib/riskApi';
+import { useAuth } from '@/contexts/AuthContext';
 
 export const LAST_UPLOAD_KEY = 'risks-dashboard:last-upload:v1';
 const DASHBOARD_STORAGE_PREFIXES = ['risks-dashboard:', 'risk-dashboard:'];
@@ -13,6 +15,13 @@ type LastUploadPayload = {
   data: DashboardData;
   fileName: string;
   savedAt: string;
+};
+
+export type DashboardSaveStatus = {
+  state: 'saving' | 'saved' | 'error';
+  savedAt?: string;
+  uploadedBy?: string;
+  message?: string;
 };
 
 async function clearSavedDashboardData() {
@@ -71,17 +80,29 @@ function readLastUpload(): LastUploadPayload | null {
 }
 
 export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'customer' }) {
+  const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [fileName, setFileName] = useState('');
   const [lastUpload, setLastUpload] = useState<LastUploadPayload | null>(() => readLastUpload());
+  const [saveStatus, setSaveStatus] = useState<DashboardSaveStatus | null>(null);
 
   function saveLastUpload(d: DashboardData, name: string) {
     try {
       const payload: LastUploadPayload = { data: d, fileName: name, savedAt: new Date().toISOString() };
       window.localStorage.setItem(LAST_UPLOAD_KEY, JSON.stringify(payload));
       setLastUpload(payload);
+      setSaveStatus({ state: 'saving', savedAt: payload.savedAt, uploadedBy: user?.username || user?.name || 'Current user' });
+      saveRiskDashboardState('last_upload_metadata', {
+        fileName: name,
+        savedAt: payload.savedAt,
+        riskCount: d.kpis.totalRisks || d.riskRegister.length,
+        uploadedBy: user?.username || user?.name || 'Current user',
+      })
+        .then(() => setSaveStatus({ state: 'saved', savedAt: payload.savedAt, uploadedBy: user?.username || user?.name || 'Current user', message: 'Upload metadata saved' }))
+        .catch(() => setSaveStatus({ state: 'error', savedAt: payload.savedAt, uploadedBy: user?.username || user?.name || 'Current user', message: 'Saved locally only' }));
     } catch {
       // Local storage can be blocked or full; dashboard should still work normally.
+      setSaveStatus({ state: 'error', uploadedBy: user?.username || user?.name || 'Current user', message: 'Unable to save local upload state' });
     }
   }
 
@@ -95,6 +116,7 @@ export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'custome
     if (!lastUpload) return;
     setData(lastUpload.data);
     setFileName(lastUpload.fileName);
+    setSaveStatus({ state: 'saved', savedAt: lastUpload.savedAt, uploadedBy: user?.username || user?.name || 'Current user', message: 'Loaded saved upload' });
   }
 
   async function handleClearPreviousUpload() {
@@ -102,6 +124,7 @@ export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'custome
     setLastUpload(null);
     setData(null);
     setFileName('');
+    setSaveStatus(null);
   }
 
   function handleWeekChange(week: string) {
@@ -122,6 +145,7 @@ export default function Home({ portal = 'admin' }: { portal?: 'admin' | 'custome
         onReset={handleReset}
         onWeekChange={handleWeekChange}
         portal={portal}
+        saveStatus={saveStatus}
       />
     );
   }

@@ -11,6 +11,7 @@ import CompanyIdentityPage from './pages/CompanyIdentity';
 import LoginPage from './pages/Login';
 import AdminPortalPage from './pages/AdminPortal';
 import CustomerPortalPage from './pages/CustomerPortal';
+import SystemManagementPage from './pages/SystemManagement';
 
 function isAdminRole(role?: string) {
   return role === 'system_admin' || role === 'risk_admin';
@@ -70,6 +71,9 @@ function Router() {
       </Route>
       <Route path="/admin/company-identity">
         <ProtectedRoute adminOnly><CompanyIdentityPage /></ProtectedRoute>
+      </Route>
+      <Route path="/admin/management">
+        <ProtectedRoute adminOnly><SystemManagementPage /></ProtectedRoute>
       </Route>
       <Route path="/admin">
         <ProtectedRoute adminOnly><AdminPortalPage /></ProtectedRoute>

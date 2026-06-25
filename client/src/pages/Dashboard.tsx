@@ -9,7 +9,7 @@ import {
   Upload, Printer, TrendingUp, TrendingDown, Minus, Filter, X, BarChart2,
   ChevronDown, ChevronRight, Home, ImageDown, FileSpreadsheet, Search,
   RotateCcw, Download, Eye, EyeOff, Moon, Sun,
-  AlertTriangle, Activity, Layers, Target, LogOut,
+  AlertTriangle, Activity, Layers, Target, LogOut, Settings,
 } from 'lucide-react';
 import { DashboardData, getScoreColor, getRatingColor, type RiskRow } from '@/lib/excelParser';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -832,9 +832,15 @@ interface Props {
   onReset: () => void;
   onWeekChange: (week: string) => void;
   portal?: 'admin' | 'customer';
+  saveStatus?: {
+    state: 'saving' | 'saved' | 'error';
+    savedAt?: string;
+    uploadedBy?: string;
+    message?: string;
+  } | null;
 }
 
-export default function DashboardPage({ data, fileName, onReset, onWeekChange, portal = 'admin' }: Props) {
+export default function DashboardPage({ data, fileName, onReset, onWeekChange, portal = 'admin', saveStatus = null }: Props) {
   const { kpis, zoneCounts, progressCounts, riskSummary, riskRegister, selectedRisk, period, weeks, selectedWeek, prevWeekLabel, residualData, overdueActions, kriData, taxonomyData, velocityData, filterOptions } = data;
 
   // Normalize target KPI math at the display layer as a safety guard.
@@ -932,6 +938,10 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange, p
   const palette = useMemo(() => makePalette(isDark), [isDark]);
   const themeBg = companyIdentity.cover_image_url || (isDark ? '/assets/dark.png' : '/assets/light.png');
   const bgForExport = isDark ? '#061630' : '#F8FBFF';
+  const saveStatusColor = saveStatus?.state === 'error' ? '#f97316' : saveStatus?.state === 'saving' ? '#38bdf8' : '#22c55e';
+  const saveStatusText = saveStatus
+    ? `${saveStatus.state === 'saving' ? 'Saving' : saveStatus.state === 'error' ? 'Saved locally' : 'Saved'}${saveStatus.savedAt ? ` - ${new Date(saveStatus.savedAt).toLocaleString()}` : ''}${saveStatus.uploadedBy ? ` by ${saveStatus.uploadedBy}` : ''}`
+    : '';
 
   useEffect(() => setActiveRisk(data.selectedRisk), [data.selectedRisk, data.selectedWeek]);
 
@@ -1526,10 +1536,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange, p
           position: 'sticky', top: 0, zIndex: 100,
           background: '#0b1120',
           borderBottom: '1px solid rgba(255,255,255,0.07)',
-          height: 52,
+          minHeight: 52,
           display: 'flex', alignItems: 'center',
-          padding: '0 20px 0 0',
+          padding: '6px 20px 6px 0',
           gap: 0,
+          flexWrap: 'wrap',
           boxShadow: '0 2px 16px rgba(0,0,0,0.45)',
           flexShrink: 0,
         }}>
@@ -1553,6 +1564,11 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange, p
             <span title="Overall risk rating from filtered dataset" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, borderRadius: 999, padding: '0 10px', background: `${overallRiskColor}22`, border: `1px solid ${overallRiskColor}`, color: overallRiskColor, fontSize: 10, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 }}>
               <AlertTriangle size={12} /> Overall Risk Rating: {overallRiskRating}
             </span>
+            {saveStatus && (
+              <span title={saveStatus.message || 'Dashboard upload save status'} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 26, borderRadius: 999, padding: '0 10px', background: `${saveStatusColor}22`, border: `1px solid ${saveStatusColor}`, color: saveStatusColor, fontSize: 10, fontWeight: 950, fontFamily: 'DM Sans, Inter, sans-serif', whiteSpace: 'normal', flexShrink: 1 }}>
+                <Activity size={12} /> {saveStatusText}
+              </span>
+            )}
           </div>
 
 
@@ -1560,6 +1576,7 @@ export default function DashboardPage({ data, fileName, onReset, onWeekChange, p
             <>
               <a href="/admin" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.8)', fontWeight: 850, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 8, textDecoration: 'none', flexShrink: 0 }}><Home size={12} />Admin</a>
               <a href="/admin/company-identity" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.8)', fontWeight: 850, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 8, textDecoration: 'none', flexShrink: 0 }}><Layers size={12} />Identity</a>
+              <a href="/admin/management" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.8)', fontWeight: 850, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 8, textDecoration: 'none', flexShrink: 0 }}><Settings size={12} />Manage</a>
             </>
           ) : (
             <a href="/customer" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.8)', fontWeight: 850, fontSize: 10, cursor: 'pointer', padding: '0 12px', fontFamily: 'DM Sans, Inter, sans-serif', marginRight: 8, textDecoration: 'none', flexShrink: 0 }}><Home size={12} />Customer</a>

@@ -25,6 +25,17 @@ export type RiskAppUser = {
   updated_at?: string;
 };
 
+export type RiskAuditLog = {
+  id?: string | number;
+  user_id?: string | number | null;
+  username?: string | null;
+  action?: string;
+  details?: unknown;
+  created_at?: string;
+  ip_address?: string;
+  [key: string]: unknown;
+};
+
 export async function getRiskSettings(): Promise<Record<string, unknown>> {
   const response = await fetch(`${API_BASE_URL}/api/app/settings`, { credentials: 'include', cache: 'no-store' });
   const body = await parseResponse<{ settings: Record<string, unknown> }>(response);
@@ -89,9 +100,9 @@ export async function toggleRiskUserActive(id: string): Promise<RiskAppUser> {
   return body.user;
 }
 
-export async function getRiskAuditLogs(limit = 100): Promise<unknown[]> {
+export async function getRiskAuditLogs(limit = 100): Promise<RiskAuditLog[]> {
   const response = await fetch(`${API_BASE_URL}/api/app/audit-logs?limit=${limit}`, { credentials: 'include', cache: 'no-store' });
-  const body = await parseResponse<{ audit_logs: unknown[] }>(response);
+  const body = await parseResponse<{ audit_logs: RiskAuditLog[] }>(response);
   return body.audit_logs;
 }
 

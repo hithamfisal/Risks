@@ -303,6 +303,30 @@ async function meHandler(req, res) {
   return res.json({ user: req.user, tenant: await getTenantIdentity() });
 }
 
+async function changePasswordHandler(req, res) {
+  const currentPassword = String(req.body?.current_password || req.body?.currentPassword || '');
+  const newPassword = String(req.body?.new_password || req.body?.newPassword || '');
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Current password and new password are required.' });
+  if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+  if (currentPassword === newPassword) return res.status(400).json({ error: 'New password must be different from the current password.' });
+
+  const db = getPool();
+  const [rows] = await db.query('SELECT * FROM risk_users WHERE id = ? AND is_active = 1 LIMIT 1', [req.user.id]);
+  const row = rows[0];
+  if (!row) return res.status(404).json({ error: 'User account was not found.' });
+
+  const ok = await bcrypt.compare(currentPassword, row.password_hash);
+  if (!ok) {
+    await audit(req, 'auth.password_change_failed', { reason: 'invalid_current_password' });
+    return res.status(401).json({ error: 'Current password is incorrect.' });
+  }
+
+  const hash = await bcrypt.hash(newPassword, 12);
+  await db.query('UPDATE risk_users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', [hash, row.id]);
+  await audit(req, 'auth.password_change', { id: row.id });
+  return res.json({ ok: true });
+}
+
 async function getSettingsMap() {
   const [rows] = await getPool().query('SELECT setting_key, setting_value, updated_at FROM risk_app_settings');
   const settings = {};
@@ -611,6 +635,7 @@ async function createApp() {
   app.post('/api/auth/login', asyncRoute(loginHandler));
   app.post('/api/auth/logout', requireAuth, asyncRoute(logoutHandler));
   app.get('/api/auth/me', requireAuth, asyncRoute(meHandler));
+  app.post('/api/auth/change-password', requireAuth, asyncRoute(changePasswordHandler));
 
   app.get('/api/app/settings', requireAuth, asyncRoute(getAppSettings));
   app.post('/api/app/settings', requireRiskAdmin, asyncRoute(postAppSettings));

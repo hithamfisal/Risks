@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'wouter';
-import { Building2, Gauge, ImagePlus, LogOut, ShieldCheck, Users, Eye, Database } from 'lucide-react';
+import { Building2, Gauge, ImagePlus, LogOut, ShieldCheck, Users, Eye, Database, Settings } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 
@@ -98,6 +98,7 @@ export default function AdminPortalPage() {
         <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
           <PortalCard href="/admin/dashboard" icon={<Gauge size={24} />} title="Risk Dashboard" description="Upload risk files and analyze KPIs, charts, and tables from the admin portal." badge="Dashboard" />
           <PortalCard href="/admin/company-identity" icon={<ImagePlus size={24} />} title="Company Identity" description="Update company name, logo, cover image, colors, and contact details for each tenant." badge="Identity" />
+          <PortalCard href="/admin/management" icon={<Settings size={24} />} title="System Management" description="Manage users, change passwords, review audit logs, export backups, and configure system settings." badge="Management" />
           <PortalCard href="/customer" icon={<Building2 size={24} />} title="Customer Portal" description="Open the separate customer-facing portal to review what non-admin users see." badge="Customer" />
           {user?.role === 'system_admin' && (
             <PortalCard href="/admin/company-identity" icon={<Users size={24} />} title="Tenant Management" description="System Admin users can select any tenant from the identity page and update its details, logo, and cover image." badge="System Admin" />
