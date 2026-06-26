@@ -44,6 +44,10 @@ const ENV = {
     .split(',')
     .map(v => v.trim())
     .filter(Boolean),
+  RISK_CORS_ORIGIN_PATTERNS: (process.env.RISK_CORS_ORIGIN_PATTERNS || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean),
 };
 
 const DEFAULT_TENANT_ID = 'risk-main';
@@ -723,7 +727,7 @@ async function uploadTenantImage(req, res, kind) {
 
 function corsMiddleware(req, res, next) {
   const origin = req.headers.origin;
-  if (origin && ENV.RISK_CORS_ORIGINS.includes(origin)) {
+  if (origin && isAllowedCorsOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -732,6 +736,17 @@ function corsMiddleware(req, res, next) {
   }
   if (req.method === 'OPTIONS') return res.status(204).end();
   return next();
+}
+
+function isAllowedCorsOrigin(origin) {
+  if (ENV.RISK_CORS_ORIGINS.includes(origin)) return true;
+  return ENV.RISK_CORS_ORIGIN_PATTERNS.some(pattern => {
+    try {
+      return new RegExp(pattern).test(origin);
+    } catch {
+      return false;
+    }
+  });
 }
 
 function asyncRoute(fn) {

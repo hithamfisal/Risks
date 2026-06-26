@@ -1,7 +1,7 @@
 function defaultApiBaseUrl() {
   if (typeof window === 'undefined') return '';
   const host = window.location.hostname.toLowerCase();
-  if (host === 'risks-dashboard.com' || host === 'www.risks-dashboard.com') {
+  if (host === 'risks-dashboard.com' || host === 'www.risks-dashboard.com' || host.endsWith('.vercel.app')) {
     return 'https://api.risks-dashboard.com';
   }
   return '';

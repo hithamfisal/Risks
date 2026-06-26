@@ -104,6 +104,8 @@ RISK_COOKIE_SECURE=true
 API_PORT=4000
 NODE_ENV=production
 RISK_CORS_ORIGINS=https://risks-dashboard.com,https://www.risks-dashboard.com
+# Optional for Vercel preview deployments:
+# RISK_CORS_ORIGIN_PATTERNS=^https://[a-z0-9-]+\\.vercel\\.app$
 ```
 
 Do not upload `.env` to GitHub.
@@ -318,7 +320,40 @@ The script builds the frontend and creates timestamped ZIP files in `deploy-pack
 
 The real `.env` file is intentionally not packaged.
 
-## 13. Importing existing local/browser data into MySQL
+## 13. Vercel frontend deployment
+
+This project can run the React frontend on Vercel while keeping the Node.js/MySQL API on Namecheap.
+
+Vercel project settings:
+
+- Framework Preset: Vite
+- Build Command: `yarn build`
+- Output Directory: `dist`
+- Install Command: `yarn install --registry https://registry.npmjs.org/ --network-timeout 600000`
+
+Add this Vercel environment variable for Production and Preview:
+
+```env
+VITE_API_BASE_URL=https://api.risks-dashboard.com
+```
+
+The frontend also falls back to `https://api.risks-dashboard.com` automatically on `*.vercel.app` domains.
+
+On the Namecheap API `.env`, add either the exact Vercel production domain:
+
+```env
+RISK_CORS_ORIGINS=https://risks-dashboard.com,https://www.risks-dashboard.com,https://your-vercel-domain.vercel.app
+```
+
+Or allow Vercel preview URLs with:
+
+```env
+RISK_CORS_ORIGIN_PATTERNS=^https://[a-z0-9-]+\\.vercel\\.app$
+```
+
+After changing Namecheap API `.env`, restart the Node.js app.
+
+## 14. Importing existing local/browser data into MySQL
 
 The current dashboard still parses and stores workbook data in the browser/local flow. For server-side saved settings:
 
