@@ -1,6 +1,5 @@
 import { DEFAULT_TENANT_ID, DEFAULT_TENANT_IDENTITY, type TenantIdentity } from '@shared/tenant';
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+import { API_BASE_URL, parseApiResponse } from '@/lib/apiBase';
 
 export { DEFAULT_TENANT_ID, DEFAULT_TENANT_IDENTITY };
 export type { TenantIdentity };
@@ -12,22 +11,13 @@ function withAssetBase(value: string) {
   return value;
 }
 
-export function normalizeTenantIdentity(tenant: TenantIdentity | null): TenantIdentity | null {
+export function normalizeTenantIdentity(tenant: TenantIdentity | null | undefined): TenantIdentity | null {
   if (!tenant) return null;
   return {
     ...tenant,
     logo_url: withAssetBase(tenant.logo_url || ''),
     cover_image_url: withAssetBase(tenant.cover_image_url || ''),
   };
-}
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = body?.error || body?.message || `Request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-  return body as T;
 }
 
 export async function fetchTenantIdentity(targetTenantId?: string): Promise<TenantIdentity> {
@@ -39,7 +29,7 @@ export async function fetchTenantIdentity(targetTenantId?: string): Promise<Tena
     credentials: 'include',
     cache: 'no-store',
   });
-  const body = await parseResponse<{ tenant: TenantIdentity }>(response);
+  const body = await parseApiResponse<{ tenant: TenantIdentity }>(response);
   return normalizeTenantIdentity(body.tenant) || DEFAULT_TENANT_IDENTITY;
 }
 
@@ -49,7 +39,7 @@ export async function listTenantIdentities(): Promise<TenantIdentity[]> {
     credentials: 'include',
     cache: 'no-store',
   });
-  const body = await parseResponse<{ tenants: TenantIdentity[] }>(response);
+  const body = await parseApiResponse<{ tenants: TenantIdentity[] }>(response);
   return body.tenants.map(tenant => normalizeTenantIdentity(tenant) || tenant);
 }
 
@@ -60,7 +50,7 @@ export async function patchTenantIdentity(payload: Partial<TenantIdentity> & { t
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const body = await parseResponse<{ tenant: TenantIdentity }>(response);
+  const body = await parseApiResponse<{ tenant: TenantIdentity }>(response);
   return normalizeTenantIdentity(body.tenant) || DEFAULT_TENANT_IDENTITY;
 }
 
@@ -74,6 +64,6 @@ export async function uploadTenantImage(kind: 'logo' | 'cover', file: File, tena
     credentials: 'include',
     body: form,
   });
-  const body = await parseResponse<{ tenant: TenantIdentity }>(response);
+  const body = await parseApiResponse<{ tenant: TenantIdentity }>(response);
   return normalizeTenantIdentity(body.tenant) || DEFAULT_TENANT_IDENTITY;
 }

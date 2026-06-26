@@ -1,17 +1,7 @@
 import type { AuthSession, AuthUser } from '@shared/auth';
 import type { TenantIdentity } from '@shared/tenant';
+import { API_BASE_URL, parseApiResponse } from '@/lib/apiBase';
 import { normalizeTenantIdentity } from '@/lib/tenantIdentity';
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = body?.error || body?.message || `Request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-  return body as T;
-}
 
 export async function login(username: string, password: string): Promise<AuthSession & { tenant: TenantIdentity | null }> {
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
@@ -20,7 +10,7 @@ export async function login(username: string, password: string): Promise<AuthSes
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
-  const session = await parseResponse<AuthSession & { tenant: TenantIdentity | null }>(response);
+  const session = await parseApiResponse<AuthSession & { tenant?: TenantIdentity | null }>(response);
   return { ...session, tenant: normalizeTenantIdentity(session.tenant) };
 }
 
@@ -29,7 +19,7 @@ export async function logout(): Promise<void> {
     method: 'POST',
     credentials: 'include',
   });
-  await parseResponse<{ ok: boolean }>(response);
+  await parseApiResponse<{ ok: boolean }>(response);
 }
 
 export async function fetchCurrentSession(): Promise<AuthSession & { tenant: TenantIdentity | null }> {
@@ -38,7 +28,7 @@ export async function fetchCurrentSession(): Promise<AuthSession & { tenant: Ten
     credentials: 'include',
     cache: 'no-store',
   });
-  const session = await parseResponse<AuthSession & { tenant: TenantIdentity | null }>(response);
+  const session = await parseApiResponse<AuthSession & { tenant?: TenantIdentity | null }>(response);
   return { ...session, tenant: normalizeTenantIdentity(session.tenant) };
 }
 
@@ -49,7 +39,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
-  const session = await parseResponse<{ ok: boolean } & Partial<AuthSession> & { tenant?: TenantIdentity | null }>(response);
+  const session = await parseApiResponse<{ ok: boolean } & Partial<AuthSession> & { tenant?: TenantIdentity | null }>(response);
   if (session.user) return { user: session.user, tenant: normalizeTenantIdentity(session.tenant ?? null) };
 }
 

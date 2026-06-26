@@ -1,12 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(body?.error || body?.message || `Request failed with status ${response.status}`);
-  }
-  return body as T;
-}
+import { API_BASE_URL, parseApiResponse } from '@/lib/apiBase';
 
 export type RiskUserRole = 'system_admin' | 'risk_admin' | 'viewer';
 
@@ -65,7 +57,7 @@ export type RiskBackup = {
 
 export async function getRiskSettings(): Promise<Record<string, unknown>> {
   const response = await fetch(`${API_BASE_URL}/api/app/settings`, { credentials: 'include', cache: 'no-store' });
-  const body = await parseResponse<{ settings: Record<string, unknown> }>(response);
+  const body = await parseApiResponse<{ settings: Record<string, unknown> }>(response);
   return body.settings;
 }
 
@@ -76,13 +68,13 @@ export async function saveRiskSettings(settings: Record<string, unknown>): Promi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ settings }),
   });
-  const body = await parseResponse<{ settings: Record<string, unknown> }>(response);
+  const body = await parseApiResponse<{ settings: Record<string, unknown> }>(response);
   return body.settings;
 }
 
 export async function listRiskUsers(): Promise<RiskAppUser[]> {
   const response = await fetch(`${API_BASE_URL}/api/app/users`, { credentials: 'include', cache: 'no-store' });
-  const body = await parseResponse<{ users: RiskAppUser[] }>(response);
+  const body = await parseApiResponse<{ users: RiskAppUser[] }>(response);
   return body.users;
 }
 
@@ -93,7 +85,7 @@ export async function createRiskUser(payload: { username: string; password: stri
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const body = await parseResponse<{ user: RiskAppUser }>(response);
+  const body = await parseApiResponse<{ user: RiskAppUser }>(response);
   return body.user;
 }
 
@@ -104,7 +96,7 @@ export async function updateRiskUser(id: string, payload: Partial<{ display_name
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const body = await parseResponse<{ user: RiskAppUser }>(response);
+  const body = await parseApiResponse<{ user: RiskAppUser }>(response);
   return body.user;
 }
 
@@ -115,7 +107,7 @@ export async function resetRiskUserPassword(id: string, password: string): Promi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
   });
-  await parseResponse<{ ok: boolean }>(response);
+  await parseApiResponse<{ ok: boolean }>(response);
 }
 
 export async function toggleRiskUserActive(id: string): Promise<RiskAppUser> {
@@ -123,25 +115,25 @@ export async function toggleRiskUserActive(id: string): Promise<RiskAppUser> {
     method: 'POST',
     credentials: 'include',
   });
-  const body = await parseResponse<{ user: RiskAppUser }>(response);
+  const body = await parseApiResponse<{ user: RiskAppUser }>(response);
   return body.user;
 }
 
 export async function getRiskAuditLogs(limit = 100): Promise<RiskAuditLog[]> {
   const response = await fetch(`${API_BASE_URL}/api/app/audit-logs?limit=${limit}`, { credentials: 'include', cache: 'no-store' });
-  const body = await parseResponse<{ audit_logs: RiskAuditLog[] }>(response);
+  const body = await parseApiResponse<{ audit_logs: RiskAuditLog[] }>(response);
   return body.audit_logs;
 }
 
 export async function getRiskSystemStatus(): Promise<RiskSystemStatus> {
   const response = await fetch(`${API_BASE_URL}/api/app/system-status`, { credentials: 'include', cache: 'no-store' });
-  const body = await parseResponse<{ status: RiskSystemStatus }>(response);
+  const body = await parseApiResponse<{ status: RiskSystemStatus }>(response);
   return body.status;
 }
 
 export async function getRiskBackup(): Promise<RiskBackup> {
   const response = await fetch(`${API_BASE_URL}/api/app/backup`, { credentials: 'include', cache: 'no-store' });
-  const body = await parseResponse<{ backup: RiskBackup }>(response);
+  const body = await parseApiResponse<{ backup: RiskBackup }>(response);
   return body.backup;
 }
 
@@ -152,13 +144,13 @@ export async function restoreRiskBackup(backup: RiskBackup): Promise<{ settings:
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ backup }),
   });
-  const body = await parseResponse<{ ok: boolean; restored: { settings: number; dashboard_state: number } }>(response);
+  const body = await parseApiResponse<{ ok: boolean; restored: { settings: number; dashboard_state: number } }>(response);
   return body.restored;
 }
 
 export async function getRiskDashboardState<T = unknown>(key = 'default'): Promise<T | null> {
   const response = await fetch(`${API_BASE_URL}/api/app/dashboard-state?key=${encodeURIComponent(key)}`, { credentials: 'include', cache: 'no-store' });
-  const body = await parseResponse<{ state: T | null }>(response);
+  const body = await parseApiResponse<{ state: T | null }>(response);
   return body.state;
 }
 
@@ -169,5 +161,5 @@ export async function saveRiskDashboardState(key: string, state: unknown): Promi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key, state }),
   });
-  await parseResponse<{ ok: boolean }>(response);
+  await parseApiResponse<{ ok: boolean }>(response);
 }
